@@ -1,0 +1,8 @@
+build/
+.cache/
+apps/backup-desktop/node_modules/
+apps/backup-desktop/dist-electron/
+apps/backup-desktop/dist-renderer/
+*.user
+*.user.*
+__pycache__/

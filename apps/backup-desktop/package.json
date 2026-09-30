@@ -1,0 +1,24 @@
+{
+  "name": "backup-desktop",
+  "private": true,
+  "version": "0.1.0",
+  "main": "dist-electron/main.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.node.json && tsc -p tsconfig.app.json && vite build",
+    "start": "electron .",
+    "test:window": "node ../../tests/desktop_window_smoke.mjs"
+  },
+  "dependencies": {
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.18.0",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@vitejs/plugin-react": "^6.1.1",
+    "electron": "^44.4.5",
+    "typescript": "^5.9.3",
+    "vite": "^8.3.1"
+  }
+}

@@ -1,0 +1,63 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="920" viewBox="0 0 1100 920" role="img" aria-labelledby="title desc">
+  <title id="title">Backup System 用例图</title>
+  <desc id="desc">普通使用者关联管理目录任务、配置筛选规则、扫描目录、执行备份、查看备份版本、还原数据和检查服务状态。部署维护者关联检查服务状态和配置并启动服务。筛选规则属于 P1，其他用例属于 P0。</desc>
+  <style>
+    text { font-family: "Noto Sans CJK SC", "WenQuanYi Micro Hei", "Microsoft YaHei", sans-serif; fill: #172b4d; }
+    .association { fill: none; stroke: #64748b; stroke-width: 1.7; }
+    .actor { fill: none; stroke: #172b4d; stroke-width: 2.2; stroke-linecap: round; }
+    .case { fill: #f4f7fc; stroke: #294c7a; stroke-width: 1.6; }
+    .case-id { font-size: 14px; fill: #516580; }
+    .case-name { font-size: 19px; }
+  </style>
+  <rect width="1100" height="920" fill="white"/>
+  <text x="550" y="34" text-anchor="middle" font-size="24" font-weight="600">Backup System 用例图</text>
+  <rect x="240" y="58" width="620" height="782" rx="0" fill="white" stroke="#294c7a" stroke-width="1.8"/>
+  <text x="264" y="88" font-size="18" font-weight="600">Backup System</text>
+  <g class="association">
+    <path d="M140 402 L365 142"/>
+    <path d="M140 402 L365 232"/>
+    <path d="M140 402 L365 322"/>
+    <path d="M140 402 L365 412"/>
+    <path d="M140 402 L365 502"/>
+    <path d="M140 402 L365 592"/>
+    <path d="M140 402 L365 682"/>
+    <path d="M960 752 L715 682"/>
+    <path d="M960 752 L715 772"/>
+  </g>
+  <g class="actor">
+    <circle cx="100" cy="362" r="17"/>
+    <path d="M100 379 V433 M63 402 H137 M100 433 L71 474 M100 433 L129 474"/>
+    <circle cx="1000" cy="712" r="17"/>
+    <path d="M1000 729 V783 M963 752 H1037 M1000 783 L971 824 M1000 783 L1029 824"/>
+  </g>
+  <text x="100" y="505" text-anchor="middle" font-size="19">普通使用者</text>
+  <text x="1000" y="855" text-anchor="middle" font-size="19">部署维护者</text>
+  <g text-anchor="middle">
+    <ellipse class="case" cx="540" cy="142" rx="175" ry="34"/>
+    <text class="case-id" x="540" y="135">UC-01</text>
+    <text class="case-name" x="540" y="158">管理目录任务</text>
+    <ellipse class="case" cx="540" cy="232" rx="175" ry="34"/>
+    <text class="case-id" x="540" y="225">UC-02 · P1</text>
+    <text class="case-name" x="540" y="248">配置筛选规则</text>
+    <ellipse class="case" cx="540" cy="322" rx="175" ry="34"/>
+    <text class="case-id" x="540" y="315">UC-03</text>
+    <text class="case-name" x="540" y="338">扫描目录</text>
+    <ellipse class="case" cx="540" cy="412" rx="175" ry="34"/>
+    <text class="case-id" x="540" y="405">UC-04</text>
+    <text class="case-name" x="540" y="428">执行备份</text>
+    <ellipse class="case" cx="540" cy="502" rx="175" ry="34"/>
+    <text class="case-id" x="540" y="495">UC-05</text>
+    <text class="case-name" x="540" y="518">查看备份版本</text>
+    <ellipse class="case" cx="540" cy="592" rx="175" ry="34"/>
+    <text class="case-id" x="540" y="585">UC-06</text>
+    <text class="case-name" x="540" y="608">还原数据</text>
+    <ellipse class="case" cx="540" cy="682" rx="175" ry="34"/>
+    <text class="case-id" x="540" y="675">UC-07</text>
+    <text class="case-name" x="540" y="698">检查服务状态</text>
+    <ellipse class="case" cx="540" cy="772" rx="175" ry="34"/>
+    <text class="case-id" x="540" y="765">UC-08</text>
+    <text class="case-name" x="540" y="788">配置并启动服务</text>
+  </g>
+  <text x="550" y="877" text-anchor="middle" font-size="14">实线表示参与者与用例的关联，不表示执行顺序。UC-02 为 P1，其余用例为 P0。</text>
+  <text x="550" y="900" text-anchor="middle" font-size="14">元数据为“执行备份”和“还原数据”的 P1 扩展行为，详见用例描述。</text>
+</svg>

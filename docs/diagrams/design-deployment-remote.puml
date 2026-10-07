@@ -1,0 +1,38 @@
+@startuml
+!pragma layout smetana
+title 远端模式部署（目标设计）
+left to right direction
+skinparam shadowing false
+skinparam defaultFontName Noto Sans CJK SC
+skinparam defaultFontSize 14
+skinparam backgroundColor white
+node "Agent 主机（Linux / WSL）" {
+  artifact "Electron GUI" as GUI
+  node "常驻 C++ Agent" as Agent
+  folder "源目录 / 恢复空目录" as Source
+  database "agent.db" as AgentDB
+}
+cloud "局域网 / 远端网络" as Network
+node "备份主机（Linux）" {
+  node "Backup Server\n配置地址:9443 / TLS" as Server
+  artifact "证书 / 单用户验证材料" as Credentials
+  database "metadata.db" as DB
+  folder "Storage\n对象 / 密文清单" as Storage
+}
+GUI --> Agent : 同 UID Unix socket
+Agent --> Source : 本机读取 / 恢复
+Agent --> AgentDB
+Agent --> Network : 上传 / 下载
+Network --> Server : TLS + 单用户认证\n版本化控制 / 二进制流
+Server --> Credentials
+Server --> DB : 版本事务
+Server --> Storage : 保存 / 校验存储字节
+note bottom of Agent
+原文校验 / 压缩 / 仓库加密在 Agent。
+仓库密码只在本机解锁。
+end note
+note bottom of Server
+Server 不访问远端源目录，
+也不持有仓库解密密钥。
+end note
+@enduml

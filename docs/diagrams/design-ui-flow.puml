@@ -1,0 +1,43 @@
+@startuml
+title 主要界面流程（目标）
+skinparam shadowing false
+skinparam defaultFontName Noto Sans CJK SC
+skinparam defaultFontSize 14
+skinparam backgroundColor white
+start
+:打开控制台，连接本机 Agent;
+if (Agent 可用？) then (是)
+  :选择 / 配置本地或远端目标;
+  :检查服务、认证及必要的仓库解锁;
+  if (目标可用？) then (是)
+    :选择目录任务、编辑规则并扫描预览;
+    if (立即备份？) then (手动)
+      :提交任务，显示阶段 / 进度;
+    else (实时)
+      :开启监控，后台合并变化并提交;
+    endif
+    if (收到已提交版本？) then (是)
+      :版本列表查看清单 / 规则 / 警告;
+      if (还原？) then (是)
+        :选择新建或空目录;
+        if (目标合法？) then (是)
+          :下载 / 解码 / 校验 / 恢复;
+          :显示成功、警告或部分失败;
+        else (否)
+          :拒绝写入，重新选择目录;
+        endif
+      else (导出)
+        :导出单文件归档，或选择归档导入;
+      endif
+    else (否)
+      :执行记录显示失败 / 待确认;
+    endif
+  else (否)
+    :说明待连接 / 认证 / 解锁原因;
+    :保留任务管理与本地扫描入口;
+  endif
+else (否)
+  :显示 Agent 不可用，提供重新连接;
+endif
+stop
+@enduml

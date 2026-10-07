@@ -1,0 +1,44 @@
+@startuml
+!pragma layout smetana
+title Backup System 构件与接口
+left to right direction
+skinparam shadowing false
+skinparam defaultFontName Noto Sans CJK SC
+skinparam defaultFontSize 14
+skinparam backgroundColor white
+skinparam componentStyle rectangle
+skinparam packageStyle rectangle
+package "Electron GUI" {
+  component "Renderer\n任务 / 版本 / 还原" as Renderer
+  component "Main + Preload\n受限 IPC / 本地连接" as Main
+}
+package "C++ Agent（用户服务）" {
+  component "Agent Control\n配置 / 事件 / 进度" as Control
+  component "Backup / Restore\n扫描 / 监控 / 校验" as Core
+  component "Object Codec\nzstd / libsodium" as Codec
+  database "agent.db\n任务 / 目标 / 执行" as LocalDB
+}
+package "C++ Backup Server" {
+  component "Transport + Auth\n本地授权 / 远端 TLS" as Transport
+  component "VersionCatalog\n提交 / 读取 / 保留" as Catalog
+  component "RepositoryStore\n暂存 / 对象 / 清单" as Store
+  database "metadata.db\n版本 / 引用 / 执行" as DB
+}
+folder "Storage\n不可变对象 / 清单" as Storage
+Renderer --> Main : 白名单 IPC
+Main --> Control : 同 UID Unix socket
+Control --> Core : 有界工作队列
+Control --> LocalDB
+Core --> Codec
+Core --> Transport : 版本化控制 / 二进制块\n远端使用 TLS
+Transport --> Catalog
+Catalog --> DB : SQLite 事务
+Catalog --> Store
+Store --> Storage : fsync / 原子改名
+note bottom of Main
+关闭 GUI 只断开本地连接。
+end note
+note bottom of Store
+Storage 是后端，不是第三个进程。
+end note
+@enduml

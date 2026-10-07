@@ -35,5 +35,11 @@ if [[ -n "${WSL_DISTRO_NAME:-}" ]]; then
         *) echo 'BACKUP_ELECTRON_PLATFORM 必须是 wayland 或 x11' >&2; exit 2 ;;
     esac
     electron_options+=("--ozone-platform=$electron_platform" --disable-gpu)
+    if [[ "$electron_platform" == wayland ]] &&
+       ! compgen -G '/dev/dri/renderD*' > /dev/null; then
+        # WSLg may expose only /dev/dxg. An empty Chromium render-node override
+        # selects the existing software path without probing nonexistent DRM.
+        electron_options+=(--render-node-override=)
+    fi
 fi
 exec "$desktop_dir/node_modules/.bin/electron" "$desktop_dir" "${electron_options[@]}" "$@"

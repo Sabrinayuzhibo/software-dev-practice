@@ -51,7 +51,7 @@ def main(agent: str, server: str) -> None:
                 text=True,
             )
             agent_process = subprocess.Popen(
-                [agent],
+                [agent, "--state-dir", str(Path(data_root) / "agent-state")],
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
@@ -68,7 +68,7 @@ def main(agent: str, server: str) -> None:
                 assert (root / "database").is_dir()
                 assert (root / "storage").is_dir()
                 assert not (root / "database" / "metadata.db").exists()
-                assert not any((root / "storage").iterdir())
+                assert not any((root / "storage" / "versions").iterdir())
 
                 request = {"type": "ping", "request_id": "integration-1", "payload": {}}
                 body = json.dumps(request).encode("utf-8")
@@ -95,10 +95,10 @@ def main(agent: str, server: str) -> None:
                 assert result["bytes"] == len(contents) and result["hashed_files"] == 1, result
                 assert result["sample"][0]["sha256"] == hashlib.sha256(contents).hexdigest()
                 assert result["sample"][0]["path"] == "sub/example.txt"
-                assert not any((root / "storage").iterdir())
+                assert not any((root / "storage" / "versions").iterdir())
 
                 occupied = subprocess.run(
-                    [server, "--data-dir", data_root, "--port", str(port)],
+                    [server, "--data-dir", str(root / "occupied"), "--port", str(port)],
                     capture_output=True, text=True, timeout=5,
                 )
                 assert occupied.returncode == 3, occupied.stderr

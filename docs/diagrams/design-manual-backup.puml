@@ -1,0 +1,60 @@
+@startuml
+title 手动备份：校验后提交
+skinparam shadowing false
+skinparam defaultFontName Noto Sans CJK SC
+skinparam defaultFontSize 14
+skinparam backgroundColor white
+hide footbox
+actor "使用者" as User
+participant "Electron GUI" as GUI
+participant "常驻 Agent" as Agent
+participant "Backup Server" as Server
+database "SQLite Catalog" as DB
+collections "Storage" as Store
+User -> GUI : 选择任务，开始备份
+GUI -> Agent : StartBackup(task_id, revision)
+Agent --> GUI : operation_id
+note over Agent,Server
+目标已授权；加密仓库在 Agent 解锁。
+Server 不接收仓库密码。
+end note
+Agent -> Agent : 冻结规则、扫描、检查源/目标边界
+Agent -> Server : BeginBackup(operation_id, repo_id)
+Server -> DB : 保存 IN_PROGRESS
+Server --> Agent : version_id
+loop 选中普通文件
+  Agent -> Agent : SHA-256、检查文件稳定性
+  Agent -> Server : HasObjects(object_id)
+  Server --> Agent : 存在 / 缺失
+  alt 对象缺失
+    Agent -> Agent : 流式编码：可选压缩 / 加密
+    loop 有界数据块
+      Agent -> Server : PutObject / DATA(offset, digest, bytes)
+      Server -> Store : 写 staging、校验存储字节
+      Server --> Agent : 块存储确认（背压）
+    end
+  else 对象已存在
+    Agent -> Agent : 验证原文与对象引用
+  end
+end
+Agent -> Agent : 生成完整清单、验证路径 / 引用
+Agent -> Server : PutManifest + PutReferences
+Server -> Store : 校验密文字节长度 / 摘要
+alt 发生读取、网络、校验或存储失败
+  Agent -> Server : AbortBackup（可连接时）
+  Server -> DB : FAILED / INTERRUPTED
+  Agent --> GUI : 失败及路径/阶段
+else 内容与引用完整
+  Agent -> Server : CommitBackup(operation_id)
+  Server -> Store : fsync、原子改名、同步目录
+  Server -> DB : 事务登记版本/引用，COMMITTED
+  DB --> Server : 提交成功
+  Server --> Agent : version_id（重复提交同结果）
+  Agent --> GUI : 已完成 / 有警告
+  GUI --> User : 可选择此版本还原
+end
+note over Agent,Server
+ACK 丢失时查询 GetOperation；
+确认提交前不重复创建版本。
+end note
+@enduml

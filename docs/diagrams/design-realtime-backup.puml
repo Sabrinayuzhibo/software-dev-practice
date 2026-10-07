@@ -1,0 +1,51 @@
+@startuml
+title 实时备份：后台、事件合并与对账
+skinparam shadowing false
+skinparam defaultFontName Noto Sans CJK SC
+skinparam defaultFontSize 14
+skinparam backgroundColor white
+hide footbox
+actor "使用者" as User
+participant "Electron GUI" as GUI
+participant "文件系统 / inotify" as FS
+participant "常驻 Agent" as Agent
+participant "Backup Server" as Server
+User -> GUI : 开启任务实时开关
+GUI -> Agent : SetRealtime(task_id, true)
+Agent -> Agent : 保存任务、建立 watch、首次对账
+Agent --> GUI : 监控状态
+User -> GUI : 关闭窗口
+GUI -> Agent : 仅断开本地 socket
+note over Agent
+常驻 Agent 不随窗口退出。
+end note
+loop 文件变化
+  FS -> Agent : 新增 / 修改 / 删除 / 重命名
+  Agent -> Agent : dirty = true；2 秒静默合并\n最长 30 秒尝试执行
+end
+alt 待连接 / 待认证 / 待解锁
+  Agent -> Agent : 持久化 dirty；进入 WAITING
+  note over Agent
+重启后无仓库明文密钥，
+重新认证/解锁后扫描当前树。
+  end note
+else 目标可用且无冲突执行
+  Agent -> Agent : 扫描当前树、与上版比较
+  alt 有变化且源稳定
+    Agent -> Server : 执行同一备份/提交流程
+    Server --> Agent : 新 COMMITTED version_id
+    Agent -> Agent : 保存结果；如仍 dirty 再次对账
+  else 没有变化
+    Agent -> Agent : 不生成空版本
+  end
+end
+FS -> Agent : 事件队列溢出 / watch 失效
+Agent -> Agent : 标记需全量对账，重新建立 watch
+note over Agent
+watch 不足时降级轮询并显示警告。
+持续变化文件失败后待稳定再尝试。
+end note
+User -> GUI : 重新打开窗口
+GUI -> Agent : SubscribeOperations + GetOperation
+Agent --> GUI : 历史结果、当前监控/等待状态
+@enduml

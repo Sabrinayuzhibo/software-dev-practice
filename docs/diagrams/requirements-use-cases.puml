@@ -1,38 +1,57 @@
 @startuml
-title Backup System 用例图
+!pragma layout smetana
+title Backup System 目标用例图
 left to right direction
 skinparam shadowing false
+skinparam defaultFontName Noto Sans CJK SC
+skinparam defaultFontSize 14
 skinparam backgroundColor white
-skinparam actorStyle stickman
 skinparam packageStyle rectangle
-
+skinparam usecaseBackgroundColor #F4F7FA
+skinparam usecaseBorderColor #506575
 actor "普通使用者" as User
 actor "部署维护者" as Operator
-
-rectangle "Backup System" {
-  usecase "UC-01\n管理目录任务" as Tasks
-  usecase "UC-02\n配置筛选规则（P1）" as Filters
-  usecase "UC-03\n扫描目录" as Scan
-  usecase "UC-04\n执行备份" as Backup
-  usecase "UC-05\n查看备份版本" as Versions
-  usecase "UC-06\n还原数据" as Restore
-  usecase "UC-07\n检查服务状态" as Status
-  usecase "UC-08\n配置并启动服务" as Service
+actor "文件系统\n事件源" as Filesystem
+rectangle "Backup System（GUI / Agent / Server / Storage）" {
+  package "P0 核心" {
+    usecase "UC-01\n配置任务与目标" as Tasks
+    usecase "UC-02\n检查连接并认证\n远端部分 P1" as Connect
+    usecase "UC-03\n扫描目录" as Scan
+    usecase "UC-04\n执行手动备份" as Backup
+    usecase "UC-05\n浏览版本与记录" as Versions
+    usecase "UC-06\n还原版本" as Restore
+    usecase "UC-12\n配置并启动服务\n远端部分 P1" as Deploy
+  }
+  package "P1 后台与远端" {
+    usecase "UC-07\n配置并触发实时备份" as Realtime
+  }
+  package "P2 规则与仓库扩展" {
+    usecase "UC-08\n编辑筛选规则" as Filters
+    usecase "UC-09\n设置并解锁加密仓库" as Unlock
+    usecase "UC-10\n导出 / 导入单文件归档" as Archive
+    usecase "UC-11\n配置保留与回收" as Retention
+  }
 }
-
 User -- Tasks
-User -- Filters
-User -- Scan
+User -- Connect
+User -right- Scan
 User -- Backup
 User -- Versions
 User -- Restore
-User -- Status
-Status -- Operator
-Service -- Operator
-
+User -- Realtime
+User -- Filters
+User -- Unlock
+User -- Archive
+User -- Retention
+Operator -- Connect
+Operator -- Deploy
+Filesystem -- Realtime
+Backup .down.> Scan : <<include>>
+Deploy -[hidden]down- Realtime
+Realtime -[hidden]down- Filters
 legend bottom
-  实线表示参与者与用例的关联，不表示执行顺序。
-  UC-02 为 P1；其余用例为 P0。
-  元数据为 UC-04 与 UC-06 的 P1 扩展行为。
+  全部阶段为目标；阶段标签不是完成状态。
+  普通文件/目录为 P0，链接/FIFO 为 P1，元数据为 P2；
+  这些行为属于扫描、备份和还原流程。
 endlegend
 @enduml

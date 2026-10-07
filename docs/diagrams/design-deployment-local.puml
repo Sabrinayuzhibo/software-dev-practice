@@ -1,0 +1,30 @@
+@startuml
+!pragma layout smetana
+title 本地模式部署（目标设计）
+left to right direction
+skinparam shadowing false
+skinparam defaultFontName Noto Sans CJK SC
+skinparam defaultFontSize 14
+skinparam backgroundColor white
+node "Linux / WSL 主机" {
+  artifact "Electron GUI" as GUI
+  node "常驻 Agent\n当前用户服务" as Agent
+  node "独立 Backup Server\n127.0.0.1:9000" as Server
+  folder "源目录 / 恢复空目录" as Source
+  database "agent.db" as AgentDB
+  database "metadata.db" as ServerDB
+  folder "Storage\n可放另一磁盘" as Storage
+}
+GUI --> Agent : Unix socket\n同 UID / 0600
+Agent --> Source : 读取 / 受限恢复
+Agent --> AgentDB
+Agent --> Server : 回环 TCP / 本地令牌\n控制 + 分块内容
+Server --> ServerDB : 版本事务
+Server --> Storage : 不可变对象 / 清单
+note bottom of Source
+源与 Server 数据根不允许重叠。
+end note
+note bottom of Storage
+同一磁盘存源和备份不能抵御磁盘故障。
+end note
+@enduml

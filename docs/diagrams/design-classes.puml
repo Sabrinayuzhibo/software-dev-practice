@@ -1,0 +1,123 @@
+@startuml
+!pragma layout smetana
+title 核心类模型（目标设计）
+skinparam shadowing false
+skinparam defaultFontName Noto Sans CJK SC
+skinparam defaultFontSize 13
+skinparam backgroundColor white
+skinparam classAttributeIconSize 0
+skinparam packageStyle rectangle
+package "领域模型" {
+  class BackupTarget {
+    +targetId: UUID
+    +mode: Local | Remote
+    +endpoint: String
+    +repoId: UUID
+  }
+  class BackupTask {
+    +taskId: UUID
+    +sourcePath: String
+    +revision: UInt64
+    +realtimeEnabled: Bool
+  }
+  class FilterPolicy {
+    +revision: UInt64
+    +includeRules: Rules
+    +excludeRules: Rules
+    +matches(entry): Bool
+  }
+  class Operation {
+    +operationId: UUID
+    +kind: OperationKind
+    +state: OperationState
+    +stage: Stage
+    +progress: Progress
+  }
+  class Repository {
+    +repoId: UUID
+    +formatVersion: UInt32
+    +encrypted: Bool
+    +publicKeyWrap: Bytes
+  }
+  class BackupVersion {
+    +versionId: UUID
+    +state: VersionState
+    +manifestHash: Digest
+    +committedAt: Timestamp
+  }
+  class VersionManifest {
+    +formatVersion: UInt32
+    +rootMetadata: LinuxMetadata
+    +ruleSnapshot: FilterPolicy
+    +referencesHash: Digest
+    +entries(): EntryStream
+  }
+  class ManifestEntry {
+    +relativePath: String
+    +kind: EntryKind
+    +objectId: Digest?
+    +linkTarget: String?
+    +metadata: LinuxMetadata
+  }
+  class ContentObject {
+    +objectId: Digest
+    +storedSize: UInt64
+    +storedSha256: Digest
+    +encoding: Encoding
+  }
+}
+package "Agent 行为" {
+  class BackupCoordinator {
+    +start(task): Operation
+    +commit(): VersionId
+  }
+  class DirectoryScanner {
+    +scan(task): VersionManifest
+  }
+  class ChangeWatcher {
+    +markDirty(task)
+    +reconcile(task)
+  }
+  class RestoreEngine {
+    +restore(version, emptyTarget): Operation
+  }
+  class ObjectCodec {
+    +encode(stream): EncodedStream
+    +decodeAndVerify(stream): PlainStream
+  }
+}
+package "Server 行为" {
+  class VersionCatalog {
+    +commit(operation): VersionId
+    +list(repo): Versions
+    +applyRetention(policy)
+  }
+  class RepositoryStore {
+    +putStaged(object)
+    +get(objectId): Stream
+    +collectUnreferenced()
+  }
+}
+BackupTarget "1" <-- "0..*" BackupTask : 目标
+BackupTask "1" *-- "1" FilterPolicy
+BackupTask "0..1" <-- "0..*" Operation : 历史独立于任务
+Repository "1" *-- "0..*" BackupVersion
+BackupVersion "1" *-- "1" VersionManifest
+VersionManifest "1" *-- "0..*" ManifestEntry : 条目流
+Repository "1" *-- "0..*" ContentObject
+ManifestEntry "0..*" --> "0..1" ContentObject : 可跨版本复用
+BackupCoordinator ..> DirectoryScanner
+DirectoryScanner ..> FilterPolicy
+ChangeWatcher ..> BackupCoordinator
+BackupCoordinator ..> ObjectCodec
+RestoreEngine ..> ObjectCodec
+BackupCoordinator ..> Operation
+RestoreEngine ..> Operation
+VersionCatalog ..> BackupVersion
+VersionCatalog --> RepositoryStore
+RepositoryStore ..> ContentObject
+note bottom of ManifestEntry
+清单条目存为流；加密仓库中是密文。
+Server 不持有原文或仓库密钥。
+end note
+@enduml

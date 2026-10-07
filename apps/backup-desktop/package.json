@@ -6,9 +6,11 @@
   "scripts": {
     "build": "tsc -p tsconfig.node.json && tsc -p tsconfig.app.json && vite build",
     "start": "electron .",
-    "test:window": "node ../../tests/desktop_window_smoke.mjs"
+    "test:window": "node ../../tests/desktop_window_smoke.mjs",
+    "test:bridge": "node ../../tests/agent_bridge_test.mjs"
   },
   "dependencies": {
+    "lucide-react": "^1.52.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0"
   },

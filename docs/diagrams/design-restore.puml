@@ -1,0 +1,49 @@
+@startuml
+title 还原：空目录、路径边界与内容验证
+skinparam shadowing false
+skinparam defaultFontName Noto Sans CJK SC
+skinparam defaultFontSize 14
+skinparam backgroundColor white
+hide footbox
+actor "使用者" as User
+participant "Electron GUI" as GUI
+participant "常驻 Agent" as Agent
+participant "Backup Server" as Server
+collections "Storage" as Store
+participant "本机恢复目录" as Target
+User -> GUI : 选择版本与恢复目录
+GUI -> Agent : StartRestore(version_id, target)
+Agent -> Server : 读取已提交版本，获取租约
+Server -> Store : GetManifest
+Server --> Agent : 清单 / 密文清单
+Agent -> Agent : 解密认证，验证路径 / 类型 / 引用
+Agent -> Target : 检查空目录与源/仓库边界，打开根目录 fd
+alt 目标非空、与源/仓库重叠或清单非法
+  Agent --> GUI : 拒绝；不写入
+else 预检查通过
+  Agent -> Target : 创建结构目录（不跟随链接）
+  loop 普通文件对象
+    Agent -> Server : GetObject
+    Server -> Store : 读取不可变对象
+    Server --> Agent : 有界数据流
+    Agent -> Agent : 解密认证、解压、SHA-256 / 长度验证
+    Agent -> Target : 临时文件验证后无覆盖发布
+  end
+  Agent -> Target : 硬链接组 → FIFO → 软链接叶子
+  Agent -> Target : 元数据恢复；目录自底向上
+  Agent -> Agent : 验证完整目录树
+  alt 内容/路径/网络/空间失败
+    Agent --> GUI : FAILED，列出部分写入范围
+  else 内容完整，元数据部分失败
+    Agent --> GUI : SUCCEEDED_WITH_WARNINGS，逐字段原因
+  else 全部验证通过
+    Agent --> GUI : SUCCEEDED
+  end
+end
+Agent -> Server : 释放读取租约（异常时超时释放）
+GUI --> User : 结果与路径
+note over Agent,Target
+O_NOFOLLOW / RESOLVE_BENEATH 与独占创建；
+不清空既有目录，不修改仓库版本或源文件。
+end note
+@enduml

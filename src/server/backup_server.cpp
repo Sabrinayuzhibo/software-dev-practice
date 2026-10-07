@@ -118,6 +118,14 @@ QJsonObject BackupServer::handleRequest(const QString& action,
                                         const QJsonObject& args,
                                         bool* uploading)
 {
+    if (action == "health")
+    {
+        return repository_.health();
+    }
+    if (action == "version_warnings")
+    {
+        return repository_.warnings(args);
+    }
     if (action == "versions")
     {
         return repository_.list(args);
@@ -164,6 +172,10 @@ QJsonObject BackupServer::handleRequest(const QString& action,
     else if (action == "finish_file")
     {
         repository_.finishFile(core::text(args, "sha256"));
+    }
+    else if (action == "warnings")
+    {
+        repository_.appendWarnings(args);
     }
     else if (action == "abort")
     {

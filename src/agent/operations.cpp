@@ -1,5 +1,7 @@
 #include "backup/agent/operations.h"
 #include "backup/agent/channel.h"
+#include "backup/agent/restore_journal.h"
+#include "backup/core/detail_page.h"
 #include "backup/core/io.h"
 
 #include <QCryptographicHash>
@@ -100,6 +102,162 @@ QString readFile(int root, const QString& path, Channel* channel,
     return digest;
 }
 
+void addSample(QJsonArray& sample, const QJsonObject& item)
+{
+    const auto fits = [&]
+    {
+        return sample.size() < kPageSize &&
+               QJsonDocument(sample).toJson(QJsonDocument::Compact).size() +
+                       detailLine(item).size() <
+                   kDetailPageBytes;
+    };
+    // Keep backed-up entries visible when skipped entries fill the preview.
+    if (item.value("type") == "file" || item.value("type") == "directory")
+    {
+        for (qsizetype index = sample.size(); index > 0 && !fits(); --index)
+        {
+            const auto type = sample[index - 1].toObject().value("type");
+            if (type == "symlink" || type == "special")
+            {
+                sample.removeAt(index - 1);
+            }
+        }
+    }
+    if (fits())
+    {
+        sample.append(item);
+    }
+}
+
+QJsonObject scanTree(const QString& source, const Progress& progress)
+{
+    const auto rootPath = canonicalPath(source);
+    Descriptor root(::open(QFile::encodeName(rootPath).constData(),
+                           O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC));
+    QJsonObject status{{"stage", "scan"}, {"root", rootPath},
+                       {"files", 0},      {"directories", 0},
+                       {"bytes", 0},      {"complete", true},
+                       {"error_count", 0}};
+    QJsonArray sample;
+    QJsonArray warnings;
+    const auto problem = [&](const QString& path, const QString& reason)
+    {
+        warnings.append(QJsonObject{{"path", path.isEmpty() ? "." : path},
+                                    {"reason", reason},
+                                    {"severity", "error"}});
+        status.insert("complete", false);
+        status.insert("error_count", number(status, "error_count") + 1);
+    };
+    std::function<void(const QString&)> visit = [&](const QString& relative)
+    {
+        checkCancelled();
+        try
+        {
+            Descriptor directory(
+                relative.isEmpty()
+                    ? ::dup(root.get())
+                    : openBelow(root.get(), relative, O_RDONLY | O_DIRECTORY));
+            struct stat before
+            {
+            };
+            require(::fstat(directory.get(), &before) == 0,
+                    "Cannot inspect directory");
+            const auto native = std::filesystem::path(
+                QFile::encodeName(rootPath + '/' + relative).toStdString());
+            std::error_code error;
+            auto iterator = std::filesystem::directory_iterator(native, error);
+            require(!error, QString::fromStdString(error.message()));
+            while (iterator != std::filesystem::directory_iterator())
+            {
+                checkCancelled();
+                const auto entry = *iterator;
+                const auto bytes =
+                    entry.path()
+                        .lexically_relative(std::filesystem::path(
+                            QFile::encodeName(rootPath).toStdString()))
+                        .native();
+                const auto path = QString::fromUtf8(bytes.data(), bytes.size());
+                try
+                {
+                    require(path.toUtf8().toStdString() == bytes &&
+                                validPath(path),
+                            "Unsupported filename encoding or path");
+                    const auto type = entry.symlink_status().type();
+                    status.insert("path", path);
+                    if (type == std::filesystem::file_type::directory)
+                    {
+                        status.insert("directories",
+                                      number(status, "directories") + 1);
+                        addSample(sample,
+                                  {{"path", path}, {"type", "directory"}});
+                        visit(path);
+                    }
+                    else if (type == std::filesystem::file_type::regular)
+                    {
+                        const auto previous = number(status, "bytes");
+                        QString hash;
+                        try
+                        {
+                            hash = readFile(root.get(), path, nullptr, status,
+                                            progress);
+                        }
+                        catch (...)
+                        {
+                            status.insert("bytes", previous);
+                            addSample(sample,
+                                      {{"path", path}, {"type", "file"}});
+                            throw;
+                        }
+                        status.insert("files", number(status, "files") + 1);
+                        addSample(sample,
+                                  {{"path", path},
+                                   {"type", "file"},
+                                   {"size", number(status, "bytes") - previous},
+                                   {"sha256", hash}});
+                    }
+                    else
+                    {
+                        const auto label =
+                            type == std::filesystem::file_type::symlink
+                                ? "symlink"
+                                : "special";
+                        addSample(sample, {{"path", path}, {"type", label}});
+                        warnings.append(QJsonObject{
+                            {"path", path},
+                            {"reason",
+                             "Special file skipped in basic backup"}});
+                    }
+                    progress(status);
+                }
+                catch (const std::exception& failure)
+                {
+                    checkCancelled();
+                    problem(path, QString::fromUtf8(failure.what()));
+                }
+                iterator.increment(error);
+                require(!error, QString::fromStdString(error.message()));
+            }
+            struct stat after
+            {
+            };
+            require(::fstat(directory.get(), &after) == 0 &&
+                        unchanged(before, after),
+                    "Source directory changed during traversal");
+        }
+        catch (const std::exception& failure)
+        {
+            checkCancelled();
+            problem(relative, QString::fromUtf8(failure.what()));
+        }
+    };
+    visit({});
+    status.insert("sample", sample);
+    status.insert("warnings", warnings);
+    status.insert("hashed_files", status.value("files"));
+    status.insert("unreadable_files", status.value("error_count"));
+    return status;
+}
+
 QJsonObject traverse(const QString& source, Channel* channel,
                      const Progress& progress)
 {
@@ -156,14 +314,11 @@ QJsonObject traverse(const QString& source, Channel* channel,
                 const QString digest =
                     readFile(root.get(), path, channel, status, progress);
                 status.insert("files", number(status, "files") + 1);
-                if (sample.size() < kPageSize)
-                {
-                    sample.append(QJsonObject{
-                        {"path", path},
-                        {"type", "file"},
-                        {"size", number(status, "bytes") - previous},
-                        {"sha256", digest}});
-                }
+                addSample(sample, QJsonObject{{"path", path},
+                                              {"type", "file"},
+                                              {"size", number(status, "bytes") -
+                                                           previous},
+                                              {"sha256", digest}});
             }
             else
             {
@@ -276,9 +431,9 @@ void fetchManifest(Channel& channel, const QString& versionId,
 
 void restoreFile(Channel& channel, const QString& versionId, int parent,
                  const QString& leaf, const QJsonObject& entry,
-                 QJsonObject& status, const Progress& progress)
+                 const QByteArray& temporary, QJsonObject& status,
+                 const Progress& progress)
 {
-    const QByteArray temporary = (".backup-" + newId()).toUtf8();
     Descriptor descriptor(
         ::openat(parent, temporary.constData(),
                  O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0600));
@@ -340,7 +495,25 @@ void restoreFile(Channel& channel, const QString& versionId, int parent,
 
 QJsonObject scan(const QString& source, const Progress& progress)
 {
-    return traverse(source, nullptr, progress);
+    try
+    {
+        return scanTree(source, progress);
+    }
+    catch (const std::exception& failure)
+    {
+        checkCancelled();
+        return {{"root", source},
+                {"files", 0},
+                {"directories", 0},
+                {"bytes", 0},
+                {"complete", false},
+                {"error_count", 1},
+                {"sample", QJsonArray{}},
+                {"warnings", QJsonArray{QJsonObject{
+                                 {"path", "."},
+                                 {"reason", QString::fromUtf8(failure.what())},
+                                 {"severity", "error"}}}}};
+    }
 }
 
 QJsonObject backup(const QJsonObject& task, const QJsonObject& target,
@@ -356,15 +529,23 @@ QJsonObject backup(const QJsonObject& task, const QJsonObject& target,
                            {"task_id", text(task, "id")},
                            {"source", source}});
     auto result = traverse(source, &channel, progress);
+    const auto warnings = result.value("warnings").toArray();
+    qint64 warningOffset = 0;
+    while (warningOffset < warnings.size())
+    {
+        const auto page = detailPage(warnings, warningOffset);
+        const auto items = page.value("items").toArray();
+        channel.call("warnings",
+                     {{"offset", warningOffset}, {"warnings", items}});
+        warningOffset += items.size();
+    }
     progress({{"stage", "commit"},
               {"files", result.value("files")},
               {"bytes", result.value("bytes")}});
     QJsonObject version;
     try
     {
-        version =
-            channel.call("commit", {{"operation_id", operationId},
-                                    {"warnings", result.value("warnings")}});
+        version = channel.call("commit", {{"operation_id", operationId}});
     }
     catch (const std::exception&)
     {
@@ -388,8 +569,8 @@ QJsonObject backup(const QJsonObject& task, const QJsonObject& target,
 }
 
 QJsonObject restore(const QJsonObject& args, const QJsonObject& target,
-                    const QJsonArray& tasks, const QString& stateDirectory,
-                    const Progress& progress)
+                    const QJsonArray& tasks, const QJsonArray& targets,
+                    const QString& stateDirectory, const Progress& progress)
 {
     Channel channel(target);
     channel.authenticate();
@@ -409,10 +590,25 @@ QJsonObject restore(const QJsonObject& args, const QJsonObject& target,
                           canonicalPath(text(value.toObject(), "path"))),
                 "Restore destination overlaps a configured source");
     }
+    for (const auto& value : targets)
+    {
+        const auto repository = value.toObject();
+        for (const auto* field : {"data_root", "repository_path"})
+        {
+            if (repository.contains(QLatin1String(field)))
+            {
+                require(!overlaps(destination,
+                                  canonicalPath(text(repository, field))),
+                        "Restore destination overlaps a configured repository");
+            }
+        }
+    }
     QTemporaryFile manifest;
     require(manifest.open(), "Cannot create temporary manifest");
     progress({{"stage", "verify"}, {"files", 0}, {"bytes", 0}});
     fetchManifest(channel, versionId, summary, manifest);
+    RestoreJournal journal(stateDirectory, text(args, "operation_id"));
+    progress({{"restore_journal", true}});
 
     // The existing parent must resolve without symlinks; mkdir only creates the
     // leaf.
@@ -431,6 +627,7 @@ QJsonObject restore(const QJsonObject& args, const QJsonObject& target,
     Descriptor root(::openat(parent.get(), leaf.constData(),
                              O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC));
     require(isEmptyDirectory(root.get()), "Restore destination must be empty");
+    require(::fsync(parent.get()) == 0, "Cannot persist restore directory");
     QJsonObject status{{"stage", "restore"},
                        {"files", 0},
                        {"directories", 0},
@@ -449,6 +646,15 @@ QJsonObject restore(const QJsonObject& args, const QJsonObject& target,
         status.insert("path", path);
         try
         {
+            auto intent = entry;
+            const auto temporary = (".backup-" + newId()).toUtf8();
+            if (entry.value("type") == "file")
+            {
+                intent.insert("temporary_path",
+                              path.left(slash + 1) +
+                                  QString::fromUtf8(temporary));
+            }
+            journal.record(intent, "pending");
             if (entry.value("type") == "directory")
             {
                 require(::mkdirat(directory.get(),
@@ -461,9 +667,10 @@ QJsonObject restore(const QJsonObject& args, const QJsonObject& target,
             else
             {
                 restoreFile(channel, versionId, directory.get(), filename,
-                            entry, status, progress);
+                            entry, temporary, status, progress);
                 status.insert("files", number(status, "files") + 1);
             }
+            journal.record(entry, "written");
             progress(status);
         }
         catch (const std::exception& error)
@@ -474,7 +681,22 @@ QJsonObject restore(const QJsonObject& args, const QJsonObject& target,
     }
     require(::fsync(root.get()) == 0 && ::fsync(parent.get()) == 0,
             "Cannot persist restored tree");
-    status.insert("warnings", summary.value("warnings"));
+    QJsonArray warnings;
+    qint64 offset = 0;
+    do
+    {
+        const auto page =
+            channel.call("version_warnings",
+                         {{"version_id", versionId}, {"offset", offset}});
+        for (const auto& warning : page.value("warnings").toArray())
+        {
+            warnings.append(warning);
+        }
+        offset = page.value("next_offset").isNull()
+                     ? -1
+                     : number(page, "next_offset");
+    } while (offset >= 0);
+    status.insert("warnings", warnings);
     return status;
 }
 } // namespace backup::agent

@@ -13,6 +13,8 @@ contextBridge.exposeInMainWorld('backup', {
     backupTask: (id: string) => ipcRenderer.invoke('tasks:backup', id),
     listVersions: (targetId: string, offset = 0, taskId = '') =>
         ipcRenderer.invoke('versions:list', targetId, offset, taskId),
+    getVersionWarnings: (targetId: string, versionId: string, offset = 0) =>
+        ipcRenderer.invoke('versions:warnings', targetId, versionId, offset),
     chooseRestoreDirectory: () =>
         ipcRenderer.invoke('directories:choose-restore'),
     restoreVersion: (
@@ -32,6 +34,8 @@ contextBridge.exposeInMainWorld('backup', {
         ipcRenderer.invoke('operations:get', id, summary),
     getOperationWarnings: (id: string, offset = 0) =>
         ipcRenderer.invoke('operations:warnings', id, offset),
+    getRestoreEntries: (id: string, offset = 0) =>
+        ipcRenderer.invoke('operations:restore-entries', id, offset),
     confirmOperation: (id: string, targetId: string) =>
         ipcRenderer.invoke('operations:confirm', id, targetId),
     minimizeWindow: () => ipcRenderer.invoke('window:minimize'),

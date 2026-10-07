@@ -42,9 +42,13 @@ function registerHandlers(): void {
             const result = await bridge.send<{
                 server: string
                 data_root: string
+                storage_state: string
+                storage_error?: string
             }>('ping', { target_id: targetId }, 15000)
             return {
                 connected: true,
+                storageAvailable: result.storage_state === 'available',
+                error: result.storage_error,
                 server: result.server,
                 dataRoot: result.data_root,
             }
@@ -98,6 +102,15 @@ function registerHandlers(): void {
         return selection.filePaths[0]
     })
     ipcMain.handle(
+        'versions:warnings',
+        (_event, targetId: unknown, versionId: unknown, offset = 0) =>
+            bridge.send('version_warnings', {
+                target_id: targetId,
+                version_id: versionId,
+                offset,
+            }),
+    )
+    ipcMain.handle(
         'versions:restore',
         (
             _event,
@@ -129,6 +142,11 @@ function registerHandlers(): void {
     )
     ipcMain.handle('operations:warnings', (_event, id: unknown, offset = 0) =>
         bridge.send('operation_warnings', { id, offset }),
+    )
+    ipcMain.handle(
+        'operations:restore-entries',
+        (_event, id: unknown, offset = 0) =>
+            bridge.send('restore_entries', { id, offset }),
     )
     ipcMain.handle(
         'operations:confirm',

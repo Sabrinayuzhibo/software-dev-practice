@@ -159,14 +159,25 @@ void writeObject(const QString& path, const QJsonObject& value)
 
 void writeAll(QFile& file, const QByteArray& bytes)
 {
-    require(file.write(bytes) == bytes.size(),
-            "Write failed: " + file.fileName());
+    qint64 offset = 0;
+    while (offset < bytes.size())
+    {
+        const auto written =
+            file.write(bytes.constData() + offset, bytes.size() - offset);
+        require(written > 0,
+                "Write failed: " + file.fileName() + ": " + file.errorString());
+        offset += written;
+    }
 }
 
 void syncFile(QFile& file)
 {
-    require(file.flush() && ::fsync(file.handle()) == 0,
-            "Cannot persist: " + file.fileName());
+    const auto flushed = file.flush();
+    require(flushed,
+            "Cannot flush: " + file.fileName() + ": " + file.errorString());
+    const auto synced = ::fsync(file.handle());
+    require(synced == 0, "Cannot persist: " + file.fileName() + ": " +
+                             QString::fromLocal8Bit(strerror(errno)));
 }
 
 void syncDirectory(const QString& path)

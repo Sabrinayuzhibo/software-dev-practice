@@ -11,6 +11,6 @@ QJsonObject scan(const QString& source, const Progress& progress);
 QJsonObject backup(const QJsonObject& task, const QJsonObject& target,
                    const QString& operationId, const Progress& progress);
 QJsonObject restore(const QJsonObject& args, const QJsonObject& target,
-                    const QJsonArray& tasks, const QString& stateDirectory,
-                    const Progress& progress);
+                    const QJsonArray& tasks, const QJsonArray& targets,
+                    const QString& stateDirectory, const Progress& progress);
 } // namespace backup::agent

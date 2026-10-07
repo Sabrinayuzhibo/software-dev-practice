@@ -10,6 +10,7 @@ import type { BackupTask } from './types'
 import type { ConsoleModel } from './use-backup-console'
 import { ScanPreview, formatBytes, formatTime, stateLabels } from './ui'
 import { OperationPanel } from './workflow'
+import { OperationConnection } from './operation-connection'
 
 export function TaskCard({
     task,
@@ -22,9 +23,17 @@ export function TaskCard({
     const scan = scans[task.id]
     const preparing = model.preparingScanId === task.id
     const running = scan?.state === 'RUNNING'
+    const scanLost =
+        running &&
+        model.operationConnection.id === scan.id &&
+        model.operationConnection.lost
     const backupOperation = backups[task.id]
     const preparingBackup = model.preparingBackupId === task.id
     const backingUp = preparingBackup || backupOperation?.state === 'RUNNING'
+    const backupLost =
+        backingUp &&
+        model.operationConnection.id === backupOperation?.id &&
+        model.operationConnection.lost
     const hasPreview = scan || preparing || backupOperation || preparingBackup
     const latest = records.find(
         (record) => record.task_id === task.id && record.action === 'backup',
@@ -56,33 +65,37 @@ export function TaskCard({
                         disabled={busy}
                         onClick={() => void model.scanTask(task.id)}
                     >
-                        {running || preparing ? (
+                        {(running || preparing) && !scanLost ? (
                             <RefreshCw className="spinning" size={16} />
                         ) : (
                             <ScanLine size={16} />
                         )}
-                        {running || preparing
-                            ? '扫描中'
-                            : scan
-                              ? '重新扫描'
-                              : '扫描预览'}
+                        {scanLost
+                            ? '扫描失联'
+                            : running || preparing
+                              ? '扫描中'
+                              : scan
+                                ? '重新扫描'
+                                : '扫描预览'}
                     </button>
                     <button
                         className="backup-button"
-                        disabled={busy || connection.state === 'offline'}
+                        disabled={busy || !model.canBackup}
                         title={
-                            connection.state === 'offline'
-                                ? '备份服务未连接'
-                                : '备份此目录'
+                            !model.canBackup ? connection.detail : '备份此目录'
                         }
                         onClick={backup}
                     >
-                        {backingUp ? (
+                        {backingUp && !backupLost ? (
                             <RefreshCw className="spinning" size={16} />
                         ) : (
                             <Upload size={16} />
                         )}
-                        {backingUp ? '备份中' : '立即备份'}
+                        {backupLost
+                            ? '备份失联'
+                            : backingUp
+                              ? '备份中'
+                              : '立即备份'}
                     </button>
                     <button
                         className="icon-button task-versions"
@@ -126,7 +139,7 @@ export function TaskCard({
             )}
             {!preparing && scan && (
                 <div className="task-preview">
-                    {scan.result && scan.state.startsWith('SUCCEEDED') ? (
+                    {scan.result ? (
                         <>
                             <ScanPreview
                                 key={scan.id}
@@ -138,7 +151,9 @@ export function TaskCard({
                                 <button
                                     className="backup-button scan-backup"
                                     disabled={
-                                        busy || connection.state === 'offline'
+                                        busy ||
+                                        !model.canBackup ||
+                                        !scan.result.complete
                                     }
                                     onClick={backup}
                                 >
@@ -153,13 +168,21 @@ export function TaskCard({
                             aria-live="polite"
                         >
                             <div className="section-heading">
-                                <h3>扫描 · {stateLabels[scan.state]}</h3>
+                                <h3>
+                                    扫描 ·{' '}
+                                    {scanLost
+                                        ? '状态失联'
+                                        : stateLabels[scan.state]}
+                                </h3>
                                 <span className="muted">
                                     {scan.files} 个文件 ·{' '}
                                     {formatBytes(scan.bytes)}
                                 </span>
                             </div>
-                            {running && <progress aria-label="扫描进行中" />}
+                            {running && !scanLost && (
+                                <progress aria-label="扫描进行中" />
+                            )}
+                            <OperationConnection id={scan.id} model={model} />
                             {scan.path && (
                                 <p className="path muted">{scan.path}</p>
                             )}

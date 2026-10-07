@@ -11,9 +11,10 @@ import {
 import { formatBytes, formatTime } from './ui'
 import type { ConsoleModel } from './use-backup-console'
 import { TaskCard } from './task-card'
+import { WarningDetails } from './warning-details'
 
 export function TargetsView({ model }: { model: ConsoleModel }) {
-    const { config, targetDraft, setTargetDraft, busy, saveTarget } = model
+    const { config, targetDraft, setTargetDraft, mutating, saveTarget } = model
     return (
         <section>
             <p className="muted">
@@ -38,10 +39,14 @@ export function TargetsView({ model }: { model: ConsoleModel }) {
                                 <td>
                                     {item.host}:{item.port}
                                 </td>
-                                <td>由本机服务管理</td>
+                                <td className="path">
+                                    {item.repository_path ||
+                                        item.data_root ||
+                                        '由本机服务管理'}
+                                </td>
                                 <td>
                                     <button
-                                        disabled={busy}
+                                        disabled={mutating}
                                         onClick={() => setTargetDraft(item)}
                                     >
                                         <Settings size={16} />
@@ -77,6 +82,25 @@ export function TargetsView({ model }: { model: ConsoleModel }) {
                     <input value="127.0.0.1" readOnly />
                 </label>
                 <label>
+                    模式
+                    <select value="local" disabled>
+                        <option value="local">本地仓库</option>
+                    </select>
+                </label>
+                <label className="repository-path">
+                    仓库路径（可选）
+                    <input
+                        value={targetDraft.repository_path || ''}
+                        placeholder="留空使用当前服务的仓库"
+                        onChange={(event) =>
+                            setTargetDraft({
+                                ...targetDraft,
+                                repository_path: event.target.value,
+                            })
+                        }
+                    />
+                </label>
+                <label>
                     端口
                     <input
                         type="number"
@@ -93,7 +117,7 @@ export function TargetsView({ model }: { model: ConsoleModel }) {
                     />
                 </label>
                 <div className="form-actions">
-                    <button className="backup-button" disabled={busy}>
+                    <button className="backup-button" disabled={mutating}>
                         保存目标
                     </button>
                     {targetDraft.id && (
@@ -120,6 +144,7 @@ export function VersionsView({ model }: { model: ConsoleModel }) {
     const {
         versions,
         versionTotal,
+        versionNextOffset,
         versionError,
         versionsLoading,
         busy,
@@ -165,9 +190,9 @@ export function VersionsView({ model }: { model: ConsoleModel }) {
             </div>
             {!versionError &&
                 !versionsLoading &&
-                connection.state === 'online' && (
-                    <p className="muted">{versionTotal} 个已完成版本</p>
-                )}
+                ['online', 'storage-unavailable'].includes(
+                    connection.state,
+                ) && <p className="muted">{versionTotal} 个已完成版本</p>}
             {versionError && (
                 <p role="alert" className="error-text">
                     {versionError}
@@ -179,7 +204,7 @@ export function VersionsView({ model }: { model: ConsoleModel }) {
             )}
             {!versionError &&
                 !versionsLoading &&
-                connection.state === 'online' &&
+                ['online', 'storage-unavailable'].includes(connection.state) &&
                 versions.length === 0 && (
                     <div className="empty-state">
                         <Archive size={32} />
@@ -211,20 +236,18 @@ export function VersionsView({ model }: { model: ConsoleModel }) {
                                 </td>
                                 <td className="path">
                                     {version.source}
-                                    {!!version.warnings.length && (
-                                        <details>
-                                            <summary>
-                                                {version.warnings.length} 项警告
-                                            </summary>
-                                            {version.warnings.map(
-                                                (item, index) => (
-                                                    <p key={index}>
-                                                        {item.path}：
-                                                        {item.reason}
-                                                    </p>
-                                                ),
-                                            )}
-                                        </details>
+                                    {!!version.warning_count && (
+                                        <WarningDetails
+                                            key={`${model.targetId}:${version.id}`}
+                                            count={version.warning_count}
+                                            loadPage={(offset) =>
+                                                window.backup.getVersionWarnings(
+                                                    model.targetId,
+                                                    version.id,
+                                                    offset,
+                                                )
+                                            }
+                                        />
                                     )}
                                 </td>
                                 <td>
@@ -233,6 +256,7 @@ export function VersionsView({ model }: { model: ConsoleModel }) {
                                         {version.directories} 个目录 ·{' '}
                                         {formatBytes(version.bytes)}
                                     </small>
+                                    <small>范围：完整目录</small>
                                 </td>
                                 <td>
                                     <button
@@ -248,10 +272,10 @@ export function VersionsView({ model }: { model: ConsoleModel }) {
                     </tbody>
                 </table>
             </div>
-            {versions.length < versionTotal && (
+            {versionNextOffset !== null && (
                 <button
                     disabled={busy || versionsLoading}
-                    onClick={() => void loadVersions(versions.length)}
+                    onClick={() => void loadVersions(versionNextOffset)}
                 >
                     加载更多
                 </button>

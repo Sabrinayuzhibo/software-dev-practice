@@ -15,6 +15,7 @@
 #include "backup/agent/channel.h"
 #include "backup/agent/history.h"
 #include "backup/agent/operations.h"
+#include "backup/agent/restore_journal.h"
 #include "backup/agent/state.h"
 #include "backup/core/io.h"
 
@@ -127,10 +128,18 @@ class CommandReader final : public QObject
             {
                 reply(id, true, state_.operationWarnings(args));
             }
+            else if (action == "restore_entries")
+            {
+                const auto record = state_.operation(text(args, "id"));
+                require(record.value("action") == "restore",
+                        "Not a restore operation");
+                reply(id, true,
+                      backup::agent::restoreEntries(state_.directory(), args));
+            }
             else if (action == "add_task" || action == "remove_task" ||
                      action == "save_target" || action == "import_tasks")
             {
-                require(!busy_,
+                require(!busy_ || action == "save_target",
                         "Agent is busy; wait before changing configuration");
                 reply(id, true, state_.configure(action, args));
             }
@@ -152,22 +161,38 @@ class CommandReader final : public QObject
         channel.authenticate();
         if (action == "ping")
         {
-            return channel.health();
+            return channel.call("health");
         }
         if (action != "confirm")
         {
-            return channel.call("versions", args);
+            return channel.call(action, args);
         }
         auto pending = state_.operation(text(args, "id"));
         require(pending.value("state") == "WAITING",
                 "Operation is not waiting");
         const auto version =
             channel.call("version", {{"version_id", text(args, "id")}});
-        pending.insert("state", version.value("warnings").toArray().isEmpty()
+        pending.insert("state", version.value("warning_count").toInteger() == 0
                                     ? "SUCCEEDED"
                                     : "SUCCEEDED_WITH_WARNINGS");
         pending.insert("error", QJsonValue());
         pending.insert("result", QJsonObject{{"version", version}});
+        QJsonArray warnings;
+        qint64 offset = 0;
+        do
+        {
+            const auto page = channel.call(
+                "version_warnings",
+                {{"version_id", text(args, "id")}, {"offset", offset}});
+            for (const auto& item : page.value("warnings").toArray())
+            {
+                warnings.append(item);
+            }
+            offset = page.value("next_offset").isNull()
+                         ? -1
+                         : number(page, "next_offset");
+        } while (offset >= 0);
+        pending.insert("warnings", warnings);
         pending.insert("finished_at", now());
         state_.saveOperation(pending);
         return backup::agent::operationDetail(pending);
@@ -184,7 +209,8 @@ class CommandReader final : public QObject
                         action == "restore",
                     "Only data operations have an asynchronous start command");
         }
-        require(action == "ping" || action == "versions" || action == "scan" ||
+        require(action == "ping" || action == "versions" ||
+                    action == "version_warnings" || action == "scan" ||
                     action == "backup" || action == "restore" ||
                     action == "confirm",
                 "Unsupported command");
@@ -205,6 +231,7 @@ class CommandReader final : public QObject
                 state_.operation(text(args, "id")).value("target").toObject();
         }
         const auto tasks = state_.config().value("tasks").toArray();
+        const auto targets = state_.config().value("targets").toArray();
         const QString stateDirectory = state_.directory();
         const bool recorded =
             action == "scan" || action == "backup" || action == "restore";
@@ -220,14 +247,15 @@ class CommandReader final : public QObject
                            {"source", args.value("path")},
                            {"destination", args.value("destination")},
                            {"version_id", args.value("version_id")}};
+        args.insert("operation_id", record.value("id"));
         if (recorded)
         {
             state_.saveOperation(record);
         }
         busy_ = true;
         worker_.reset(QThread::create(
-            [this, requestId, action, args, task, target, tasks, stateDirectory,
-             record, recorded, asynchronous]() mutable
+            [this, requestId, action, args, task, target, tasks, targets,
+             stateDirectory, record, recorded, asynchronous]() mutable
             {
                 QJsonObject result;
                 QString error;
@@ -243,7 +271,9 @@ class CommandReader final : public QObject
                     {
                         record.insert(item.key(), item.value());
                     }
-                    if (recorded && (stageChanged || interval.elapsed() >= 200))
+                    if (recorded &&
+                        (stageChanged || update.contains("restore_journal") ||
+                         interval.elapsed() >= 200))
                     {
                         state_.saveOperation(record);
                         interval.restart();
@@ -268,8 +298,9 @@ class CommandReader final : public QObject
                     }
                     else if (action == "restore")
                     {
-                        result = backup::agent::restore(
-                            args, target, tasks, stateDirectory, progress);
+                        result =
+                            backup::agent::restore(args, target, tasks, targets,
+                                                   stateDirectory, progress);
                     }
                     else
                     {
@@ -280,8 +311,15 @@ class CommandReader final : public QObject
                                       ? "SUCCEEDED"
                                       : "SUCCEEDED_WITH_WARNINGS");
                     record.insert("result", result);
+                    if (action == "scan" && !result.value("complete").toBool())
+                    {
+                        record.insert("state", "FAILED");
+                        record.insert("error",
+                                      "Scan incomplete; see reported paths");
+                    }
                     for (const auto* key :
-                         {"files", "bytes", "directories", "warnings"})
+                         {"files", "bytes", "directories", "warnings",
+                          "error_count", "complete"})
                     {
                         if (result.contains(QLatin1String(key)))
                         {
@@ -306,7 +344,8 @@ class CommandReader final : public QObject
                     {
                         worker_->wait();
                         if (action == "ping" && error.isEmpty() &&
-                            target.contains("id"))
+                            target.contains("id") &&
+                            state_.target(text(target, "id")) == target)
                         {
                             try
                             {

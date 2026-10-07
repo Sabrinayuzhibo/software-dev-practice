@@ -9,7 +9,7 @@ qt_network = dependency('qt6', modules: ['Network'], method: 'pkg-config')
 inc = include_directories('include')
 
 protocol = static_library('backup-protocol',
-  ['src/protocol/frame.cpp', 'src/core/io.cpp'],
+  ['src/protocol/frame.cpp', 'src/core/io.cpp', 'src/core/detail_page.cpp'],
   include_directories: inc,
   dependencies: qt_core)
 protocol_dep = declare_dependency(
@@ -23,7 +23,8 @@ agent_moc = qt6.compile_moc(
   dependencies: [qt_core, qt_network])
 agent_core = static_library('backup-agent-core',
   ['src/agent/agent_client.cpp', 'src/agent/channel.cpp',
-   'src/agent/state.cpp', 'src/agent/history.cpp', 'src/agent/operations.cpp', agent_moc],
+   'src/agent/state.cpp', 'src/agent/history.cpp', 'src/agent/restore_journal.cpp',
+   'src/agent/operations.cpp', agent_moc],
   include_directories: inc,
   dependencies: [protocol_dep, qt_network])
 agent_dep = declare_dependency(
@@ -82,4 +83,10 @@ test('backup-streaming', python3,
 
 test('operation-history', python3,
   args: [files('tests/operation_history.py')[0], agent.full_path(), server.full_path()],
+  timeout: 120)
+test('backup-p0-boundaries', python3,
+  args: [files('tests/backup_p0_boundaries.py')[0], agent.full_path(), server.full_path()],
+  timeout: 120)
+test('backup-disk-full', python3,
+  args: [files('tests/backup_disk_full.py')[0], agent.full_path(), server.full_path()],
   timeout: 120)

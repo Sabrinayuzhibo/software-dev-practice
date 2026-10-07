@@ -10,6 +10,8 @@ import { useEffect, useRef, type ReactNode } from 'react'
 import type { Operation } from './types'
 import type { ConsoleModel } from './use-backup-console'
 import { WarningDetails } from './warning-details'
+import { RestoreDetails } from './restore-details'
+import { OperationConnection } from './operation-connection'
 import {
     actionLabels,
     formatBytes,
@@ -164,6 +166,10 @@ export function OperationPanel({
 }) {
     const { busy } = model
     const running = detail.state === 'RUNNING'
+    const lost =
+        running &&
+        model.operationConnection.id === detail.id &&
+        model.operationConnection.lost
     const succeeded = detail.state.startsWith('SUCCEEDED')
     const Heading = embedded ? 'h3' : 'h2'
     return (
@@ -173,7 +179,8 @@ export function OperationPanel({
         >
             <div className="section-heading">
                 <Heading>
-                    {actionLabels[detail.action]} · {stateLabels[detail.state]}
+                    {actionLabels[detail.action]} ·{' '}
+                    {lost ? '状态失联' : stateLabels[detail.state]}
                 </Heading>
                 <div className="inline-actions">
                     <span>
@@ -192,7 +199,8 @@ export function OperationPanel({
                     )}
                 </div>
             </div>
-            {running && <progress aria-label="操作进行中" />}
+            {running && !lost && <progress aria-label="操作进行中" />}
+            <OperationConnection id={detail.id} model={model} />
             <p className="path">{detail.destination || detail.source}</p>
             {running && detail.path && (
                 <small className="path">{detail.path}</small>
@@ -239,7 +247,11 @@ export function OperationPanel({
                     key={detail.id}
                     operationId={detail.id}
                     count={detail.warning_count}
+                    label={detail.error_count ? '项问题' : '项警告'}
                 />
+            )}
+            {detail.restore_journal && !running && (
+                <RestoreDetails key={detail.id} operationId={detail.id} />
             )}
         </section>
     )

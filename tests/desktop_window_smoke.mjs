@@ -17,6 +17,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { setTimeout as delay } from 'node:timers/promises'
+import { checkP0 } from './desktop_p0_checks.mjs'
 
 const root = fileURLToPath(new URL('../', import.meta.url))
 const execute = promisify(execFile)
@@ -762,7 +763,7 @@ try {
         await page.evaluate(`Array.from(document.querySelectorAll('.task-card')).map(card => ({
         id: card.dataset.taskId,
         source: card.querySelector('.task-copy .path').textContent,
-        file: card.querySelector('.scan-table tbody td').textContent,
+        file: card.querySelector('.scan-table tr[data-type="file"] td').textContent,
         warnings: card.querySelector('.scan-warnings summary')?.textContent || '',
     }))`)
     assert.deepEqual(
@@ -1125,6 +1126,14 @@ try {
         await readFile(join(restoreDirectory, '中文 file.txt'), 'utf8'),
         'desktop backup roundtrip\n',
     )
+    await click('.restore-details summary')
+    await until(
+        () =>
+            page.evaluate(
+                "document.querySelector('.restore-details')?.textContent.includes('已写入 2 项')",
+            ),
+        'persisted restore entries in the desktop',
+    )
     await main.evaluate('scanAgentPrototype.send = originalAgentSend')
     await click('[data-tab="tasks"]')
     assert(
@@ -1245,6 +1254,16 @@ try {
             ),
         'service after reload',
     )
+    await checkP0({
+        page,
+        main,
+        click,
+        refresh,
+        until,
+        temporary,
+        sourceDirectory,
+        backupId,
+    })
     await main.evaluate('testWindow.setSize(850, 600)')
     await delay(150)
     const narrow = await page.call('Page.captureScreenshot', { format: 'png' })

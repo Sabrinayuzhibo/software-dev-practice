@@ -22,6 +22,24 @@ QJsonObject find(const QJsonArray& rows, const QString& id)
     }
     throw Error("Configuration item not found: " + id);
 }
+
+bool sameRepository(const QJsonObject& first, const QJsonObject& second)
+{
+    if (first.value("host") == second.value("host") &&
+        number(first, "port") == number(second, "port"))
+    {
+        return true;
+    }
+    const auto root = [](const QJsonObject& target)
+    {
+        return target.value("repository_path")
+            .toString(target.value("data_root").toString());
+    };
+    const auto left = root(first);
+    const auto right = root(second);
+    return !left.isEmpty() && !right.isEmpty() &&
+           canonicalPath(left) == canonicalPath(right);
+}
 } // namespace
 
 State::State(const QString& directory) : directory_(canonicalPath(directory))
@@ -87,6 +105,12 @@ State::State(const QString& directory) : directory_(canonicalPath(directory))
                     : "Agent exited before completion; restore may contain "
                       "partial files");
             record.insert("finished_at", now());
+            if (record.value("action") == "restore" &&
+                QFileInfo::exists(directory_ + "/restores/" +
+                                  text(record, "id") + ".jsonl"))
+            {
+                record.insert("restore_journal", true);
+            }
             saveOperation(record);
         }
     }
@@ -141,19 +165,29 @@ QJsonObject State::addTask(const QJsonObject& args)
     require(!overlaps(source, directory_), "Source overlaps Agent state");
     const QString targetId = text(args, "target_id");
     const auto destination = target(targetId);
-    if (destination.contains("data_root"))
+    for (const auto& value : config_.value("targets").toArray())
     {
-        require(
-            !overlaps(source, canonicalPath(text(destination, "data_root"))),
-            "Source overlaps repository");
+        const auto repository = value.toObject();
+        for (const auto* field : {"data_root", "repository_path"})
+        {
+            if (repository.contains(QLatin1String(field)))
+            {
+                require(
+                    !overlaps(source, canonicalPath(text(repository, field))),
+                    "Source overlaps repository");
+            }
+        }
     }
     auto tasks = config_.value("tasks").toArray();
     for (const auto& item : tasks)
     {
         const auto existing = item.toObject();
         if (existing.value("path") == source &&
-            existing.value("target_id") == targetId)
+            sameRepository(target(text(existing, "target_id")), destination))
         {
+            require(existing.value("target_id") == targetId,
+                    "Source already configured for this repository under "
+                    "another target");
             return existing;
         }
     }
@@ -227,6 +261,11 @@ QJsonObject State::configure(const QString& action, const QJsonObject& args)
     auto next = config_;
     if (action == "save_target")
     {
+        require(!args.contains("mode") || args.value("mode") == "local",
+                "Only local targets are supported");
+        require(!args.contains("repository_path") ||
+                    args.value("repository_path").isString(),
+                "Invalid repository path");
         const QString id = args.value("id").toString(newId());
         require(validId(id), "Invalid target identifier");
         require(text(args, "host") == "127.0.0.1" && number(args, "port") > 0 &&
@@ -236,13 +275,59 @@ QJsonObject State::configure(const QString& action, const QJsonObject& args)
         auto targets = config_.value("targets").toArray();
         QJsonObject value{{"id", id},
                           {"name", name},
+                          {"mode", "local"},
                           {"host", "127.0.0.1"},
                           {"port", args.value("port")}};
+        const auto repository = args.value("repository_path").toString();
+        if (!repository.isEmpty())
+        {
+            require(QDir(repository).isAbsolute(),
+                    "Repository path must be absolute");
+            const auto root = canonicalPath(repository);
+            for (const auto& task : config_.value("tasks").toArray())
+            {
+                require(!overlaps(root,
+                                  canonicalPath(text(task.toObject(), "path"))),
+                        "Repository overlaps a configured source");
+            }
+            value.insert("repository_path", root);
+        }
+        const auto tasks = config_.value("tasks").toArray();
+        for (const auto& first : tasks)
+        {
+            const auto task = first.toObject();
+            if (task.value("target_id") != id)
+            {
+                continue;
+            }
+            for (const auto& second : tasks)
+            {
+                const auto other = second.toObject();
+                if (other.value("target_id") != id &&
+                    canonicalPath(text(other, "path")) ==
+                        canonicalPath(text(task, "path")))
+                {
+                    require(!sameRepository(value,
+                                            target(text(other, "target_id"))),
+                            "Target change would duplicate an existing source "
+                            "and repository");
+                }
+            }
+        }
         bool replaced = false;
         for (qsizetype index = 0; index < targets.size(); ++index)
         {
             if (targets[index].toObject().value("id") == id)
             {
+                const auto previous = targets[index].toObject();
+                if (previous.value("host") == value.value("host") &&
+                    number(previous, "port") == number(value, "port") &&
+                    previous.contains("data_root") &&
+                    (repository.isEmpty() || value.value("repository_path") ==
+                                                 previous.value("data_root")))
+                {
+                    value.insert("data_root", previous.value("data_root"));
+                }
                 targets[index] = value;
                 replaced = true;
             }

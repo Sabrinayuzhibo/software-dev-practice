@@ -7,9 +7,11 @@ import { actionLabels, formatBytes, formatTime, stateLabels } from './ui'
 function RecordCells({
     record,
     showRecord,
+    lost,
 }: {
     record: Operation
     showRecord: (id: string) => Promise<void>
+    lost: boolean
 }) {
     return (
         <>
@@ -33,7 +35,7 @@ function RecordCells({
                 <span
                     className={`state-label state-label-${record.state.toLowerCase()}`}
                 >
-                    {stateLabels[record.state]}
+                    {lost ? '状态失联' : stateLabels[record.state]}
                 </span>
                 {!!record.warning_count && (
                     <small>{record.warning_count} 项警告</small>
@@ -152,7 +154,15 @@ function RecordRow({
                         </button>
                     )}
                 </td>
-                <RecordCells record={record} showRecord={model.showRecord} />
+                <RecordCells
+                    record={record}
+                    showRecord={model.showRecord}
+                    lost={
+                        record.state === 'RUNNING' &&
+                        model.operationConnection.id === record.id &&
+                        model.operationConnection.lost
+                    }
+                />
             </tr>
             {expanded &&
                 currentHistory.map((item) => (
@@ -165,6 +175,11 @@ function RecordRow({
                         <RecordCells
                             record={item}
                             showRecord={model.showRecord}
+                            lost={
+                                item.state === 'RUNNING' &&
+                                model.operationConnection.id === item.id &&
+                                model.operationConnection.lost
+                            }
                         />
                     </tr>
                 ))}

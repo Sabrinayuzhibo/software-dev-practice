@@ -44,8 +44,12 @@ QList<QByteArray> warningLines(const QJsonArray& warnings)
     {
         require(value.isObject(), "Invalid warning entry");
         const auto item = value.toObject();
-        const QJsonObject normalized{{"path", text(item, "path")},
-                                     {"reason", text(item, "reason")}};
+        QJsonObject normalized{{"path", text(item, "path")},
+                               {"reason", text(item, "reason")}};
+        if (item.value("severity") == "error")
+        {
+            normalized.insert("severity", "error");
+        }
         auto line = QJsonDocument(normalized).toJson(QJsonDocument::Compact);
         require(line.size() + 1 < kHistoryPageBytes / 2,
                 "Warning entry exceeds supported size");
@@ -209,10 +213,13 @@ QJsonObject operationSummary(const QJsonObject& record)
 {
     const auto detail = operationDetail(record);
     QJsonObject summary;
-    for (const auto* key :
-         {"id", "action", "state", "started_at", "finished_at", "stage",
-          "files", "bytes", "directories", "task_id", "target", "source",
-          "destination", "path", "error", "version_id", "warning_count"})
+    for (const auto* key : {"id",          "action",         "state",
+                            "started_at",  "finished_at",    "stage",
+                            "files",       "bytes",          "directories",
+                            "task_id",     "target",         "source",
+                            "destination", "path",           "error",
+                            "version_id",  "warning_count",  "error_count",
+                            "complete",    "restore_journal"})
     {
         if (detail.contains(QLatin1String(key)))
         {

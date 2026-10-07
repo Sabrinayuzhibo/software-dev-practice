@@ -1,16 +1,20 @@
 import { useEffect, useRef, useState } from 'react'
 import { RefreshCw } from 'lucide-react'
-import type { Warning } from './types'
+import type { Warning, WarningPage } from './types'
 
 // Key by operation ID at the call site so a new scan starts with a fresh page.
 export function WarningDetails({
     operationId,
+    loadPage,
     count,
     className = '',
+    label = '项警告',
 }: {
-    operationId: string
+    operationId?: string
+    loadPage?: (offset: number) => Promise<WarningPage>
     count: number
     className?: string
+    label?: string
 }) {
     const [warnings, setWarnings] = useState<Warning[]>([])
     const [nextOffset, setNextOffset] = useState<number | null>(0)
@@ -33,10 +37,12 @@ export function WarningDetails({
         setLoading(true)
         setError('')
         try {
-            const page = await window.backup.getOperationWarnings(
-                operationId,
-                nextOffset,
-            )
+            const page = loadPage
+                ? await loadPage(nextOffset)
+                : await window.backup.getOperationWarnings(
+                      operationId!,
+                      nextOffset,
+                  )
             if (mounted.current) {
                 setWarnings((old) => [...old, ...page.warnings])
                 setNextOffset(page.next_offset)
@@ -62,10 +68,19 @@ export function WarningDetails({
                 }
             }}
         >
-            <summary>{count} 项警告</summary>
+            <summary>
+                {count} {label}
+            </summary>
             <div className="warning-list">
                 {warnings.map((warning, index) => (
-                    <p className="path" key={index}>
+                    <p
+                        className={
+                            warning.severity === 'error'
+                                ? 'path error-text'
+                                : 'path'
+                        }
+                        key={index}
+                    >
                         {warning.path}：{warning.reason}
                     </p>
                 ))}

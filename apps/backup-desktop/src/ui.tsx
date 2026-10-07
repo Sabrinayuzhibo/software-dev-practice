@@ -164,6 +164,7 @@ export function ScanPreview({
                     operationId={operationId}
                     count={result.warning_count}
                     className="scan-warnings"
+                    label={result.complete ? '项警告' : '项问题'}
                 />
             )}
             {expanded && (
@@ -173,35 +174,63 @@ export function ScanPreview({
                             <thead>
                                 <tr>
                                     <th>路径</th>
+                                    <th>类型</th>
                                     <th>大小</th>
                                     <th>内容校验值</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 {result.sample.map((file) => (
-                                    <tr key={file.path}>
+                                    <tr
+                                        key={file.path}
+                                        data-type={file.type || 'file'}
+                                    >
                                         <td>{file.path}</td>
-                                        <td>{formatBytes(file.size)}</td>
+                                        <td>
+                                            {
+                                                (
+                                                    {
+                                                        file: '文件',
+                                                        directory: '目录',
+                                                        symlink: '软链接',
+                                                        special: '特殊条目',
+                                                    } as Record<string, string>
+                                                )[file.type || 'file']
+                                            }
+                                        </td>
+                                        <td>
+                                            {file.size === undefined
+                                                ? '-'
+                                                : formatBytes(file.size)}
+                                        </td>
                                         <td className="digest">
-                                            <span
-                                                className="digest-short"
-                                                title={`SHA-256: ${file.sha256}`}
-                                            >
-                                                {file.sha256}
-                                            </span>
-                                            <details className="digest-details">
-                                                <summary>SHA-256</summary>
-                                                <code>{file.sha256}</code>
-                                            </details>
+                                            {file.sha256 ? (
+                                                <>
+                                                    <span
+                                                        className="digest-short"
+                                                        title={`SHA-256: ${file.sha256}`}
+                                                    >
+                                                        {file.sha256}
+                                                    </span>
+                                                    <details className="digest-details">
+                                                        <summary>
+                                                            SHA-256
+                                                        </summary>
+                                                        <code>
+                                                            {file.sha256}
+                                                        </code>
+                                                    </details>
+                                                </>
+                                            ) : (
+                                                '-'
+                                            )}
                                         </td>
                                     </tr>
                                 ))}
                             </tbody>
                         </table>
                     </div>
-                    <p className="muted">
-                        显示前 {result.sample.length} 个文件
-                    </p>
+                    <p className="muted">显示 {result.sample.length} 个条目</p>
                 </>
             )}
         </section>

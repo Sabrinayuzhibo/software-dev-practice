@@ -26,6 +26,11 @@ Channel::Channel(const QJsonObject& target)
     require(connected,
             "Cannot connect to local Server: " + socket_.errorString());
     health_ = call("ping");
+    const auto expectedRoot = target.value("repository_path").toString();
+    require(expectedRoot.isEmpty() ||
+                canonicalPath(expectedRoot) ==
+                    canonicalPath(text(health_, "data_root")),
+            "Repository path does not match the connected Server");
 }
 
 QJsonObject Channel::health() const

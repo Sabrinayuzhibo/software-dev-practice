@@ -93,8 +93,10 @@ def main(agent: str, server: str) -> None:
                 result = scan["result"]
                 assert result["files"] == 1 and result["directories"] == 1, result
                 assert result["bytes"] == len(contents) and result["hashed_files"] == 1, result
-                assert result["sample"][0]["sha256"] == hashlib.sha256(contents).hexdigest()
-                assert result["sample"][0]["path"] == "sub/example.txt"
+                preview = {item["path"]: item for item in result["sample"]}
+                assert preview["sub"]["type"] == "directory"
+                assert preview["sub/example.txt"]["sha256"] == hashlib.sha256(contents).hexdigest()
+                assert preview["sub/example.txt"]["type"] == "file"
                 assert not any((root / "storage" / "versions").iterdir())
 
                 occupied = subprocess.run(

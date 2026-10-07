@@ -7,6 +7,8 @@ import type {
     Version,
 } from './types'
 
+const maxStatusFailures = 3
+
 export function useBackupConsole() {
     const [config, setConfig] = useState<Configuration>({
         tasks: [],
@@ -36,6 +38,14 @@ export function useBackupConsole() {
     const [preparingRestore, setPreparingRestore] = useState(false)
     const [versions, setVersions] = useState<Version[]>([])
     const [versionTotal, setVersionTotal] = useState(0)
+    const [versionNextOffset, setVersionNextOffset] = useState<number | null>(
+        null,
+    )
+    const [operationConnection, setOperationConnection] = useState({
+        id: '',
+        lost: false,
+        error: '',
+    })
     const [versionError, setVersionError] = useState('')
     const [versionsLoading, setVersionsLoading] = useState(false)
     const [versionTaskId, setVersionTaskId] = useState('')
@@ -64,6 +74,7 @@ export function useBackupConsole() {
     const busy = activeId !== null || !!starting || mutating
     const target = config.targets.find((item) => item.id === targetId)
     const tasks = config.tasks.filter((item) => item.target_id === targetId)
+    const canBackup = connection.state === 'online'
 
     function selectTarget(id: string) {
         if (id === targetRef.current) {
@@ -81,6 +92,7 @@ export function useBackupConsole() {
         })
         setVersions([])
         setVersionTotal(0)
+        setVersionNextOffset(null)
         setVersionError('')
         setVersionsLoading(false)
         setVersionTaskId('')
@@ -124,8 +136,16 @@ export function useBackupConsole() {
                 return
             }
             setConnection({
-                state: result.connected ? 'online' : 'offline',
-                detail: result.connected ? '服务可用' : '服务未连接',
+                state: !result.connected
+                    ? 'offline'
+                    : result.storageAvailable
+                      ? 'online'
+                      : 'storage-unavailable',
+                detail: !result.connected
+                    ? '服务未连接'
+                    : result.storageAvailable
+                      ? '服务可用'
+                      : '存储不可用',
                 root: result.dataRoot || '',
                 error: result.error || '',
             })
@@ -185,6 +205,7 @@ export function useBackupConsole() {
                     offset ? [...old, ...result.versions] : result.versions,
                 )
                 setVersionTotal(result.total)
+                setVersionNextOffset(result.next_offset)
             } catch (error) {
                 if (request === versionRequest.current) {
                     setVersionError(`查询版本失败：${String(error)}`)
@@ -206,8 +227,16 @@ export function useBackupConsole() {
         void loadRecords().then((items) => {
             const running = items?.find((item) => item.state === 'RUNNING')
             if (running) {
+                if (running.target?.id) {
+                    selectTarget(running.target.id)
+                }
                 setActiveId(running.id)
                 setDetail(running)
+                if (running.task_id) {
+                    const update =
+                        running.action === 'scan' ? setScans : setBackups
+                    update((old) => ({ ...old, [running.task_id!]: running }))
+                }
             }
         })
     }, [loadRecords])
@@ -219,7 +248,11 @@ export function useBackupConsole() {
     }, [refreshConnection, activeId])
 
     useEffect(() => {
-        if (tab === 'versions' && !activeId && connection.state === 'online') {
+        if (
+            tab === 'versions' &&
+            !activeId &&
+            ['online', 'storage-unavailable'].includes(connection.state)
+        ) {
             void loadVersions()
         }
         if (tab === 'records') {
@@ -233,6 +266,7 @@ export function useBackupConsole() {
         }
         let cancelled = false
         let polling = false
+        let failures = 0
         let timer: ReturnType<typeof setTimeout>
         const poll = async () => {
             if (polling || cancelled) {
@@ -248,6 +282,8 @@ export function useBackupConsole() {
                 if (cancelled) {
                     return
                 }
+                failures = 0
+                setOperationConnection({ id: activeId, lost: false, error: '' })
                 setDetail(operation)
                 // Polling refreshes an open record without selecting it.
                 setRecordDetail((old) =>
@@ -283,19 +319,32 @@ export function useBackupConsole() {
                 void loadRecords()
             } catch (error) {
                 if (!cancelled) {
-                    setMessage(`执行状态暂时不可用，正在重试：${String(error)}`)
-                    timer = setTimeout(poll, 2000)
+                    ++failures
+                    setOperationConnection({
+                        id: activeId,
+                        lost: failures >= maxStatusFailures,
+                        error: String(error),
+                    })
+                    if (failures < maxStatusFailures) {
+                        timer = setTimeout(poll, 2000)
+                    }
                 }
             } finally {
                 polling = false
             }
         }
         void poll()
-        window.addEventListener('focus', poll)
+        const retry = () => {
+            failures = 0
+            void poll()
+        }
+        window.addEventListener('focus', retry)
+        window.addEventListener('backup:retry-operation', retry)
         return () => {
             cancelled = true
             clearTimeout(timer)
-            window.removeEventListener('focus', poll)
+            window.removeEventListener('focus', retry)
+            window.removeEventListener('backup:retry-operation', retry)
         }
     }, [activeId, loadRecords])
 
@@ -310,7 +359,11 @@ export function useBackupConsole() {
     async function scanTask(taskId: string) {
         clearScan(taskId)
         setPreparingScanId(taskId)
-        await run(() => window.backup.scanTask(taskId), '正在准备扫描')
+        await run(() => window.backup.scanTask(taskId), '正在准备扫描', {
+            action: 'scan',
+            task_id: taskId,
+            source: config.tasks.find((item) => item.id === taskId)?.path,
+        })
         setPreparingScanId(null)
     }
 
@@ -325,20 +378,50 @@ export function useBackupConsole() {
     async function backupTask(taskId: string) {
         clearBackup(taskId)
         setPreparingBackupId(taskId)
-        await run(() => window.backup.backupTask(taskId), '正在准备备份')
+        await run(() => window.backup.backupTask(taskId), '正在准备备份', {
+            action: 'backup',
+            task_id: taskId,
+            source: config.tasks.find((item) => item.id === taskId)?.path,
+        })
         setPreparingBackupId(null)
     }
 
     async function run(
         start: () => Promise<{ operation_id: string } | null>,
-        label = '正在准备',
+        label: string,
+        context: Pick<
+            Operation,
+            'action' | 'task_id' | 'source' | 'destination'
+        >,
     ) {
         setMessage('')
         setStarting(label)
         try {
             const result = await start()
             if (result) {
-                setDetail(null)
+                // The start receipt exists even when the first status query fails.
+                const pending: Operation = {
+                    ...context,
+                    id: result.operation_id,
+                    state: 'RUNNING',
+                    stage: 'prepare',
+                    started_at: new Date().toISOString(),
+                    target: target!,
+                    files: 0,
+                    bytes: 0,
+                    warning_count: 0,
+                }
+                setDetail(pending)
+                if (pending.task_id) {
+                    const update =
+                        pending.action === 'scan' ? setScans : setBackups
+                    update((old) => ({ ...old, [pending.task_id!]: pending }))
+                }
+                setOperationConnection({
+                    id: result.operation_id,
+                    lost: false,
+                    error: '',
+                })
                 setActiveId(result.operation_id)
             }
         } catch (error) {
@@ -393,8 +476,27 @@ export function useBackupConsole() {
             const next = await window.backup.saveTarget(targetDraft)
             setConfig(next)
             setTargetDraft({ name: '', host: '127.0.0.1', port: 9000 })
-            setMessage('目标已保存')
-            void refreshConnection()
+            ++connectionRequest.current
+            ++versionRequest.current
+            setVersions([])
+            setVersionTotal(0)
+            setVersionNextOffset(null)
+            setVersionsLoading(false)
+            setMessage(
+                activeId
+                    ? '配置已保存，将用于下次执行；当前操作继续使用原配置。'
+                    : '目标已保存',
+            )
+            if (activeId) {
+                setConnection({
+                    state: 'unchecked',
+                    detail: '目标配置已更新，待检查',
+                    root: '',
+                    error: '',
+                })
+            } else {
+                void refreshConnection()
+            }
         } catch (error) {
             setMessage(String(error))
         } finally {
@@ -424,6 +526,7 @@ export function useBackupConsole() {
         setVersionTaskId(task?.id || '')
         setVersions([])
         setVersionTotal(0)
+        setVersionNextOffset(null)
         navigate('versions')
     }
 
@@ -463,6 +566,7 @@ export function useBackupConsole() {
                     restoreDestination,
                 ),
             '正在准备还原',
+            { action: 'restore', destination: restoreDestination },
         )
         setPreparingRestore(false)
     }
@@ -531,6 +635,7 @@ export function useBackupConsole() {
         preparingRestore,
         versions,
         versionTotal,
+        versionNextOffset,
         versionError,
         versionsLoading,
         versionTaskId,
@@ -542,6 +647,11 @@ export function useBackupConsole() {
         targetDraft,
         setTargetDraft,
         busy,
+        mutating,
+        canBackup,
+        operationConnection,
+        retryOperation: () =>
+            window.dispatchEvent(new Event('backup:retry-operation')),
         starting,
         target,
         refreshConnection,

@@ -152,7 +152,11 @@ def run(agent_binary, server_binary):
             second, second_stored = scan()
             assert first_stored["warning_ref"] == second_stored["warning_ref"]
             assert first["bytes"] != second["bytes"]
-            assert first["result"]["sample"][0]["sha256"] != second["result"]["sample"][0]["sha256"]
+            def content_hash(record):
+                return next(item["sha256"] for item in record["result"]["sample"]
+                            if item["path"] == "data.txt")
+
+            assert content_hash(first) != content_hash(second)
             (nested / "new-link").symlink_to("missing")
             third, third_stored = scan()
             assert third["warning_count"] == 421

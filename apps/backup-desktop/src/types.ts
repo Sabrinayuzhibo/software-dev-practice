@@ -10,6 +10,9 @@ export interface Target {
     name: string
     host: string
     port: number
+    mode?: 'local'
+    repository_path?: string
+    data_root?: string
 }
 
 export interface Configuration {
@@ -20,6 +23,7 @@ export interface Configuration {
 export interface Warning {
     path: string
     reason: string
+    severity?: 'error'
 }
 
 export interface ScanResult {
@@ -29,7 +33,8 @@ export interface ScanResult {
     bytes: number
     complete: boolean
     warning_count: number
-    sample: { path: string; size: number; sha256: string }[]
+    error_count?: number
+    sample: { path: string; type?: string; size?: number; sha256?: string }[]
 }
 
 export interface Version {
@@ -40,7 +45,8 @@ export interface Version {
     files: string
     directories: string
     bytes: string
-    warnings: Warning[]
+    warning_count: number
+    rules: Record<string, unknown>
 }
 
 export interface Operation {
@@ -60,6 +66,9 @@ export interface Operation {
     bytes: number
     error?: string
     warning_count: number
+    error_count?: number
+    complete?: boolean
+    restore_journal?: boolean
     scan_group?: string
     scan_count?: number
     failure_count?: number
@@ -80,11 +89,26 @@ export interface WarningPage {
     next_offset: number | null
 }
 
+export interface RestorePage {
+    entries: {
+        path: string
+        type: string
+        state: 'pending' | 'written'
+        temporary_path?: string
+    }[]
+    total: number
+    next_offset: number | null
+    written: number
+    uncertain: number
+    incomplete: boolean
+}
+
 export interface DesktopApi {
     getConfig(): Promise<Configuration>
     saveTarget(target: Partial<Target>): Promise<Configuration>
     pingServer(targetId?: string): Promise<{
         connected: boolean
+        storageAvailable?: boolean
         server?: string
         error?: string
         dataRoot?: string
@@ -98,7 +122,16 @@ export interface DesktopApi {
         targetId: string,
         offset?: number,
         taskId?: string,
-    ): Promise<{ versions: Version[]; total: number }>
+    ): Promise<{
+        versions: Version[]
+        total: number
+        next_offset: number | null
+    }>
+    getVersionWarnings(
+        targetId: string,
+        versionId: string,
+        offset?: number,
+    ): Promise<WarningPage>
     restoreVersion(
         targetId: string,
         versionId: string,
@@ -112,6 +145,7 @@ export interface DesktopApi {
     ): Promise<OperationPage>
     getOperation(id: string, summary?: boolean): Promise<Operation>
     getOperationWarnings(id: string, offset?: number): Promise<WarningPage>
+    getRestoreEntries(id: string, offset?: number): Promise<RestorePage>
     confirmOperation(id: string, targetId: string): Promise<Operation>
     minimizeWindow(): Promise<void>
     toggleMaximizeWindow(): Promise<void>

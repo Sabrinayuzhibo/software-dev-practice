@@ -9,24 +9,27 @@
 | 项目组与成员 | 提交前填写实际信息 |
 | 需求基线 | [需求分析说明书](requirements.md) 1.0 |
 
-> 本文主体规定最终目标设计。2026-10-06 的基础功能实现见第 1.0 节；其他接口、数据库及扩展仍按阶段实施。附录 A 保留 2026-10-01 的原型快照，实际验证见测试报告。
+> 本文主体规定最终目标设计。更新至 2026-10-08 的基础功能实现见第 1.0 节；其他接口、数据库及扩展仍按阶段实施。附录 A 保留 2026-10-01 的原型快照，实际验证见测试报告。
 
 ## 1. 设计依据与总体架构
 
-### 1.0 当前基础实现（2026-10-06）
+### 1.0 当前基础实现（2026-10-08）
 
-基础功能已覆盖 FR-01—06、FR-17，并接入 FR-07 的基础操作界面。当前实现采用现有 Qt Core/Network、JSON 帧和 Electron 子进程结构，以下明确其与后续架构设计的区别：
+当前实现覆盖 FR-01—06、FR-17 的 P0 本地行为，并接入 FR-07 的基础操作界面；真实掉电等验收边界见测试报告，导出保留到 P2。实现采用现有 Qt Core/Network、JSON 帧和 Electron 子进程结构，以下明确其与后续架构设计的区别：
 
 | 部分 | 当前基础实现 |
 | --- | --- |
-| 配置与记录 | Agent 独占 `--state-dir`，`config.json` 保存任务/目标，`operations/<id>.json` 保存阶段、计数、结果及错误；QSaveFile 原子替换，旧 tasks.json 导入一次并保留 |
+| 配置与记录 | Agent 独占 `--state-dir`，`config.json` 保存任务/目标，`operations/<id>.json` 保存阶段、计数、结果及错误；QSaveFile 原子替换，旧 tasks.json 导入一次并保留。目标设置可在执行中保存，工作线程继续使用开始时的副本；可选 repository_path 校验本机 Server 的实际仓库，别名目标也不能重复添加同一来源 |
+| 可用性 | ping 保留协议握手；认证后的 health 检查数据库、暂存和版本目录可列举，并写入、回读、fsync、删除临时文件。返回 storage_state / storage_error；目录读取失败不能返回空版本列表 |
 | 本地控制 | Main 通过 JSON Lines 发送白名单命令；`start_scan/start_backup/start_restore` 返回执行 ID，GUI 轮询记录；单个数据工作线程，事件线程仍可查询状态；关闭 GUI 终止 Agent |
 | 桌面交互（2026-10-07） | Main 串行发送请求直到收到响应，避免连接检查与数据请求争抢单个 Agent 工作线程；长操作返回执行 ID 后继续轮询。还原目录选择与发起还原分离，确认后才提交；版本按任务筛选。最小化时不暂停 Renderer 定时器，恢复时同步焦点并重绘 |
 | 服务接口 | 保留 `u32be length + JSON` 协议；文件块最多 256 KiB，以 Base64 放入内容消息，每块获得写入确认后再发下一块；清单和版本分页；本机令牌认证 |
-| 仓库格式 1 | `database/access.json` 存本地令牌；`storage/staging/<operation-id>/` 暂存；`storage/versions/<operation-id>/` 保存已提交版本；每版包含 summary.json、entries.jsonl 和按条目编号命名的 .data 文件 |
+| 仓库格式 1 | `database/access.json` 存本地令牌；`storage/staging/<operation-id>/` 暂存；`storage/versions/<operation-id>/` 保存已提交版本；每版包含 summary.json、entries.jsonl、warnings.jsonl 和按条目编号命名的 .data 文件。新摘要保存 warning_count / warnings_sha256，查询仍兼容旧内嵌 warnings；需同时更新两端程序 |
+| 大量警告 | 备份分批上传警告后提交；版本列表省略明细，version_warnings 按需返回，每页最多 100 项、64 KiB 并校验整份 JSONL。Agent 执行记录的重复明细按 SHA-256 共享；版本文件内容仍独立保存 |
+| 扫描 | 文件、目录及跳过条目带类型预览，样本同时受数量和字节上限约束。单项读取失败继续检查其他条目，保存 error_count / complete 和具体路径；扫描不完整时记录 FAILED 并保留预览。备份保持失败即停止的语义 |
 | 提交 | 每个文件验证长度/SHA-256 并 fsync，清单计算整体摘要；摘要与清单写入后同步目录，暂存目录原子改名为版本目录并同步父目录；该改名是唯一可见点；重复 commit 查询同一版本 |
-| 故障恢复 | 未提交暂存从不参与查询/还原；保留用于诊断。Agent 重启将 RUNNING 记录标记 INTERRUPTED；提交阶段中断标为 WAITING，按同一执行 ID 查询，避免误报提交失败 |
-| 还原 | 先将分页清单下载至临时文件并验证摘要、条目、父子关系和统计；然后用目录 fd、openat/O_NOFOLLOW、mkdirat 创建条目；单个文件验证后以 linkat 无覆盖发布，失败清除该临时文件，先前完成内容保留并报告 |
+| 故障恢复 | 未提交暂存从不参与查询/还原；保留用于诊断。Agent 重启将 RUNNING 记录标记 INTERRUPTED；提交阶段中断标为 WAITING，按同一执行 ID 查询。客户端连续 3 次查询失败时显示状态失联，停止自动轮询并保留操作锁；手动重试或窗口获得焦点时重新查询，不擅自终止 Agent 或认定备份失败 |
+| 还原 | 先验证分页清单和源/仓库重叠保护，再以目录 fd、openat/O_NOFOLLOW、mkdirat 创建条目；单个文件验证后以 linkat 无覆盖发布。`restores/<id>.jsonl` 在写入前同步 pending，完成持久化后同步 written；失败后分页返回已写入及待核对项，包含中断临时文件位置；重启保留该记录，撕裂的最后一行明确标记不完整 |
 | 资源与类型 | 有界文件块和网络缓冲；普通文件/目录完整处理，特殊条目警告跳过；每版独立保存内容；内存中的路径集合随条目数增长，未承诺百万条目规模 |
 
 当前尚未采用下文的 SQLite、对象去重、二进制 DATA 帧、Unix socket 常驻 Agent、远端 TLS、监控、压缩或加密。源文件可读性/类型、读取前后 stat 信息和目录变化会检查，但不提供文件系统原子快照。仓库格式升级需单独迁移，不应把格式 1 数据直接当作未来对象仓库。

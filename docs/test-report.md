@@ -168,3 +168,26 @@ Windows 测试使用 Win32 `ShowWindowAsync` 和鼠标事件，经 WSLg 到 Elec
 用户报告启动脚本完成编译后没有窗口。检查确认 Electron 主进程、Renderer、C++ Agent 均在运行，Windows 存在 `[WARN:COPY MODE] Backup System (Ubuntu-24.04)` 窗口。Win32 报告可见、未最小化且可设为前台，但用户仍看不到；窗口区域的宿主截图也未显示应用内容。`/mnt/wslg/weston.log` 在本次图形会话初始化时记录 `rdp_allocate_shared_memory` 打开共享内存失败，错误为 `Input/output error`，随后 `use_gfxredir = 0`。
 
 默认 Wayland 下的 Chromium 输入、页面截图和工作流回归通过；这不能证明 Windows 实际显示链路正常。对照命令 `BACKUP_ELECTRON_PLATFORM=x11 npm run test:window --prefix apps/backup-desktop` 完成工作流检查后，在最小化步骤超时，因此未切换默认显示模式。当前证据提示 WSLg/宿主显示异常，尚未通过重启验证共享内存错误是否为唯一根因。本轮未停止用户的 Agent/Server、未重启 WSL，README 已补充保存工作和停止任务后重启图形环境的排障步骤；实际窗口恢复仍待验证。
+
+## 2026-10-08 P0 缺口补齐
+
+范围：用户确认本轮只补 P0，导出留到 P2。沿用 Qt 6.4.2、Electron 44.4.5、WSL2 / WSLg 环境，基于工作区未提交改动。遵循项目 huawei-coding skill，测试均使用独立临时配置、源目录及仓库，没有重启用户的客户端、Server 或 WSL。
+
+| 检查 / 命令 | 实际结果及对应范围 |
+| --- | --- |
+| `./scripts/build.sh` | 9 个 Meson 套件全部通过，0 跳过；TypeScript 和 Vite 构建通过，无新增 C++ 编译告警。包含原有协议、路径安全、迁移、备份还原、故障、历史记录和大文件回归 |
+| `backup-p0-boundaries`：FR-01 / FR-02 | 真实上传暂停时保存目标新端口，当前操作使用原快照并成功，下次操作使用新端口；仓库路径不匹配、源/仓库交叉、别名目标重复源、修改目标导致重复任务均拒绝。存储不可写时 health 返回 unavailable，恢复权限后可用；不可列举的版本目录返回查询错误，不伪装成空仓库 |
+| `backup-p0-boundaries`：FR-03 | 两个无读取权限文件、一个无权限目录均汇总到同一不完整扫描，其他可读文件继续计算 SHA-256；文件、目录、软链接带类型；失效根目录保留失败预览；扫描不生成版本 |
+| `backup-p0-boundaries`：FR-04 / FR-05 | 同一目录真实备份 10 次，每次 1,899 项长路径警告，单版明细超过 1 MiB；列表只含摘要、warning_count 与保存的 rules，每页最多 100 项并按字节限制。旧内嵌警告版本仍可分页、还原；重启、源内容变化后的新旧还原分别正确。损坏警告只使明细查询失败，列表仍可用 |
+| `backup-p0-boundaries`：FR-06 / FR-17 | 125 个文件的版本在第 111 个文件损坏时失败，写入明细分页列出 110 项已写入及 1 项待核对，与磁盘内容匹配；正常还原列出 125 项。下载中杀死 Agent，再模拟日志尾部撕裂，重启恢复 INTERRUPTED，保留 2 项已写入、1 项待核对和残留临时文件路径；还原也拒绝其他已配置仓库 |
+| `backup-disk-full`：FR-04 / FR-06 | 独立 user/mount namespace 内创建 8 MiB 仓库 tmpfs、2 MiB 还原 tmpfs，真实写入触发 ENOSPC。新备份失败且不发布，存储检查显示不可用，旧版仍可还原；还原失败带写入明细，未经验证文件与临时文件未留下，原版本再次还原成功。此次未跳过，不是仅模拟权限错误 |
+| `npm run test:bridge --prefix apps/backup-desktop` | 超大 UTF-8 响应只拒绝所属请求；后台计数、PID、后续帧与查询继续正常 |
+| `npm run test:window --prefix apps/backup-desktop` | 真实 Electron 全流程通过，新增用例由 `desktop_p0_checks.mjs` 执行：第一次状态查询即失败，三次后停止自动重试、显示失联并保留操作锁；重载页面后仍按持久化摘要恢复所属任务的失联显示，手动重查取回真实结果。执行期间仍可编辑目标并提示下次生效；不完整预览汇总两项错误、类型列可见，预览备份按钮禁用；存储不可用仍可查询历史版本；201 项旧版本警告按 100/100/1 加载；还原写入明细可见 |
+| 最后配置校验后的定向回归 | `source scripts/qt-env.sh` 后运行 `meson test -C build backup-p0-boundaries backup-integration backup-faults --print-errorlogs --logbase p0-final`，3 套件全部通过 |
+| 布局与格式 | 1120×760、850×600 截图复核，扫描表格、目标表单及失联提示无横向溢出；改动 C++ 的 clang-format 检查、TS/TSX/CSS/MJS 的 Prettier 检查与 `git diff --check` 通过 |
+
+本轮 1 GiB 备份 / 还原为 22.82 / 16.43 秒，Agent / Server 峰值 RSS 为 25,184 / 22,460 KiB，仅代表本机样本。证据：`build/meson-logs/testlog.txt`、`build/meson-logs/p0-final.txt`；新增测试为 `tests/backup_p0_boundaries.py`、`tests/backup_disk_full.py`、`tests/desktop_p0_checks.mjs`。截图在 `/tmp/backup-operation-lost.png`、`/tmp/backup-targets-p0.png`、`/tmp/backup-incomplete-1120.png` 和 `/tmp/backup-incomplete-850.png`。
+
+验证边界：物理掉电、存储控制器缓存失效和百万条目规模未验证，进程 kill 与 tmpfs 写满不能代替掉电验收。旧还原记录未保存过逐项写入数据，不能追补；新还原才有持久化写入日志。分页控制响应大小，但记录/路径集合仍随条目数增长；当前不自动清理历史、共享警告或失败暂存。新警告接口需要客户端和 Server 同时更新，已有仓库继续读取，不能将新版本直接交给旧程序解释。
+
+本轮首次 Wayland 窗口回归在最大化/还原图标同步处超时，后续完整回归通过，含最小化恢复。保留上一节关于 Windows 实际窗口不可见的未解决边界：页面截图和自动化通过不等同于用户宿主窗口已恢复；未重启 WSL，也未宣称该显示问题已修复。

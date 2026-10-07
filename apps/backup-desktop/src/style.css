@@ -216,7 +216,8 @@ p {
 .status-dot.online {
     background: #268258;
 }
-.status-dot.offline {
+.status-dot.offline,
+.status-dot.storage-unavailable {
     background: #c3504a;
 }
 .status-copy {
@@ -441,10 +442,10 @@ td.digest {
     font-size: 11px;
 }
 .scan-table th:first-child {
-    width: 50%;
+    width: 38%;
 }
 .scan-table th:last-child {
-    width: 32%;
+    width: 30%;
 }
 .versions-table th:last-child,
 .versions-table td:last-child {
@@ -638,6 +639,7 @@ summary {
     max-width: 680px;
 }
 .target-form h2,
+.repository-path,
 .form-actions {
     grid-column: 1 / -1;
 }

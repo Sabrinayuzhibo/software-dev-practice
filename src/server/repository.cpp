@@ -1,11 +1,14 @@
 #include "backup/server/repository.h"
+#include "backup/core/detail_page.h"
 #include "backup/core/io.h"
 
 #include <QDir>
 #include <QFileInfo>
 #include <QJsonDocument>
 #include <QRegularExpression>
+#include <QTemporaryFile>
 #include <algorithm>
+#include <filesystem>
 #include <limits>
 
 namespace backup::server
@@ -36,10 +39,9 @@ void Repository::open(const QString& root)
                 "Cannot protect local access token");
     }
     token_ = text(readObject(tokenPath), "token");
-    // This probe also rejects unwritable storage before listening.
-    const QString probe = root_ + "/storage/.probe-" + newId();
-    writeObject(probe, {{"format", 1}});
-    require(QFile::remove(probe), "Cannot remove storage probe");
+    const auto checked = health();
+    require(checked.value("storage_state") == "available",
+            checked.value("storage_error").toString());
 }
 
 QString Repository::root() const
@@ -51,6 +53,41 @@ QString Repository::token() const
     return token_;
 }
 
+QJsonObject Repository::health() const
+{
+    QJsonObject result{{"server", "Backup Server"},
+                       {"data_root", root_},
+                       {"storage_state", "available"}};
+    try
+    {
+        for (const auto* folder :
+             {"database", "storage/staging", "storage/versions"})
+        {
+            const auto path = root_ + '/' + folder;
+            require(!QFileInfo(path).isSymLink(),
+                    "Repository contains a link: " + path);
+            std::filesystem::directory_iterator readable(
+                QFile::encodeName(path).toStdString());
+            QTemporaryFile probe(path + "/.probe-XXXXXX");
+            const auto opened = probe.open();
+            require(opened, "Storage unavailable: " + path + ": " +
+                                probe.errorString());
+            writeAll(probe, "storage check\n");
+            syncFile(probe);
+            require(probe.seek(0) && probe.readAll() == "storage check\n",
+                    "Cannot read storage probe: " + path);
+            require(probe.remove(), "Cannot remove storage probe");
+            syncDirectory(path);
+        }
+    }
+    catch (const std::exception& error)
+    {
+        result.insert("storage_state", "unavailable");
+        result.insert("storage_error", QString::fromUtf8(error.what()));
+    }
+    return result;
+}
+
 QString Repository::versionPath(const QString& id) const
 {
     require(validId(id), "Invalid version identifier");
@@ -59,19 +96,52 @@ QString Repository::versionPath(const QString& id) const
 
 QJsonObject Repository::version(const QString& id) const
 {
-    const auto result = readObject(versionPath(id) + "/summary.json");
+    auto result = readObject(versionPath(id) + "/summary.json");
     require(result.value("format").toInt() == 1 && result.value("id") == id,
             "Unsupported or corrupt version");
+    if (result.contains("warnings"))
+    {
+        require(result.value("warnings").isArray(), "Invalid version warnings");
+        result.insert("warning_count",
+                      result.value("warnings").toArray().size());
+        result.remove("warnings");
+    }
     return result;
+}
+
+QJsonObject Repository::warnings(const QJsonObject& request) const
+{
+    const auto id = text(request, "version_id");
+    const auto summary = readObject(versionPath(id) + "/summary.json");
+    require(summary.value("format").toInt() == 1 && summary.value("id") == id &&
+                (!summary.contains("warnings") ||
+                 summary.value("warnings").isArray()),
+            "Unsupported or corrupt version");
+    const auto offset =
+        request.contains("offset") ? number(request, "offset") : 0;
+    auto page = summary.contains("warnings")
+                    ? detailPage(summary.value("warnings").toArray(), offset)
+                    : readDetailPage(versionPath(id) + "/warnings.jsonl",
+                                     offset, number(summary, "warning_count"),
+                                     text(summary, "warnings_sha256"));
+    page.insert("warnings", page.take("items"));
+    return page;
 }
 
 QJsonObject Repository::list(const QJsonObject& request) const
 {
     QList<QJsonObject> versions;
-    const auto names = QDir(root_ + "/storage/versions")
-                           .entryList(QDir::Dirs | QDir::NoDotAndDotDot);
-    for (const auto& name : names)
+    const auto path = root_ + "/storage/versions";
+    // QDir::entryList silently returns an empty list for an unreadable folder.
+    for (const auto& entry : std::filesystem::directory_iterator(
+             QFile::encodeName(path).toStdString()))
     {
+        if (!entry.is_directory())
+        {
+            continue;
+        }
+        const auto name =
+            QString::fromStdString(entry.path().filename().string());
         auto value = version(name);
         if (request.value("task_id").toString().isEmpty() ||
             value.value("task_id") == request.value("task_id"))
@@ -87,13 +157,14 @@ QJsonObject Repository::list(const QJsonObject& request) const
               });
     const qint64 offset =
         request.contains("offset") ? number(request, "offset") : 0;
-    QJsonArray page;
-    for (qint64 index = offset;
-         index < versions.size() && page.size() < kPageSize; ++index)
+    QJsonArray items;
+    for (const auto& item : versions)
     {
-        page.append(versions[index]);
+        items.append(item);
     }
-    return {{"versions", page}, {"total", versions.size()}};
+    auto page = detailPage(items, offset);
+    page.insert("versions", page.take("items"));
+    return page;
 }
 
 QJsonObject Repository::entries(const QJsonObject& request) const
@@ -106,12 +177,22 @@ QJsonObject Repository::entries(const QJsonObject& request) const
     require(offset <= file.size() && file.seek(offset),
             "Invalid manifest offset");
     QJsonArray page;
+    qint64 bytes = 0;
     while (!file.atEnd() && page.size() < kPageSize)
     {
+        const auto position = file.pos();
         const auto line = file.readLine(64 * 1024);
         require(line.endsWith('\n'), "Corrupt manifest entry");
+        if (bytes + line.size() > kDetailPageBytes && !page.isEmpty())
+        {
+            require(file.seek(position), "Cannot seek manifest");
+            break;
+        }
         page.append(parseObject(line));
+        bytes += line.size();
     }
+    require(file.error() == QFileDevice::NoError,
+            "Cannot read version manifest");
     return {{"entries", page},
             {"offset", QString::number(file.pos())},
             {"done", file.atEnd()}};
@@ -162,9 +243,23 @@ QJsonObject Repository::begin(const QJsonObject& request)
     directories_.clear();
     fileHash_.reset();
     manifestHash_.reset();
-    manifest_.setFileName(stagingPath_ + "/entries.jsonl");
-    require(manifest_.open(QIODevice::WriteOnly | QIODevice::NewOnly),
-            "Cannot create version manifest");
+    warningHash_.reset();
+    warningCount_ = 0;
+    try
+    {
+        manifest_.setFileName(stagingPath_ + "/entries.jsonl");
+        require(manifest_.open(QIODevice::WriteOnly | QIODevice::NewOnly),
+                "Cannot create version manifest");
+        warnings_.setFileName(stagingPath_ + "/warnings.jsonl");
+        require(warnings_.open(QIODevice::WriteOnly | QIODevice::NewOnly),
+                "Cannot create version warnings");
+    }
+    catch (...)
+    {
+        // begin has not transferred ownership to the connection yet.
+        abort();
+        throw;
+    }
     activeId_ = id;
     return {{"version_id", id}};
 }
@@ -243,9 +338,39 @@ void Repository::finishFile(const QString& digest)
     bytes_ += number(currentEntry_, "size");
 }
 
+void Repository::appendWarnings(const QJsonObject& request)
+{
+    require(!activeId_.isEmpty() && warnings_.isOpen(), "No active upload");
+    require(number(request, "offset") == warningCount_,
+            "Invalid warning offset");
+    require(request.value("warnings").isArray(), "Invalid warning batch");
+    const auto items = request.value("warnings").toArray();
+    require(items.size() <= kPageSize, "Too many warnings in one batch");
+    for (const auto& value : items)
+    {
+        const auto warning = value.toObject();
+        const auto line = detailLine({{"path", text(warning, "path")},
+                                      {"reason", text(warning, "reason")}});
+        writeAll(warnings_, line);
+        warningHash_.addData(line);
+        ++warningCount_;
+    }
+}
+
 QJsonObject Repository::commit(const QString& id, const QJsonArray& warnings)
 {
     require(activeId_ == id && !content_.isOpen(), "Incomplete upload");
+    // Accept the original commit interface for existing clients.
+    require(warnings.isEmpty() || warningCount_ == 0,
+            "Warnings already uploaded");
+    qint64 offset = 0;
+    while (offset < warnings.size())
+    {
+        const auto page = detailPage(warnings, offset);
+        const auto items = page.value("items").toArray();
+        appendWarnings({{"offset", offset}, {"warnings", items}});
+        offset += items.size();
+    }
     summary_.insert("completed_at", now());
     summary_.insert("files", QString::number(files_));
     summary_.insert("directories", QString::number(directoriesCount_));
@@ -253,7 +378,11 @@ QJsonObject Repository::commit(const QString& id, const QJsonArray& warnings)
     summary_.insert("entries", QString::number(entryCount_));
     summary_.insert("manifest_sha256",
                     QString::fromLatin1(manifestHash_.result().toHex()));
-    summary_.insert("warnings", warnings);
+    summary_.insert("warning_count", warningCount_);
+    summary_.insert("warnings_sha256",
+                    QString::fromLatin1(warningHash_.result().toHex()));
+    syncFile(warnings_);
+    warnings_.close();
     syncFile(manifest_);
     manifest_.close();
     writeObject(stagingPath_ + "/summary.json", summary_);
@@ -271,6 +400,7 @@ void Repository::abort()
 {
     content_.close();
     manifest_.close();
+    warnings_.close();
     // Keep interrupted staging for diagnosis; it is never returned by
     // list/read.
     activeId_.clear();

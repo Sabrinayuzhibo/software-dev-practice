@@ -17,7 +17,9 @@ class Repository
     void open(const QString& root);
     QString root() const;
     QString token() const;
+    QJsonObject health() const;
     QJsonObject version(const QString& id) const;
+    QJsonObject warnings(const QJsonObject& request) const;
     QJsonObject list(const QJsonObject& request) const;
     QJsonObject entries(const QJsonObject& request) const;
     QJsonObject download(const QJsonObject& request) const;
@@ -27,6 +29,7 @@ class Repository
     void addEntry(const QJsonObject& entry);
     void append(const QJsonObject& request);
     void finishFile(const QString& digest);
+    void appendWarnings(const QJsonObject& request);
     QJsonObject commit(const QString& id, const QJsonArray& warnings);
     void abort();
 
@@ -43,6 +46,9 @@ class Repository
     QSet<QString> directories_;
     QFile manifest_;
     QFile content_;
+    QFile warnings_;
+    QCryptographicHash warningHash_{QCryptographicHash::Sha256};
+    qint64 warningCount_ = 0;
     QCryptographicHash fileHash_{QCryptographicHash::Sha256};
     QCryptographicHash manifestHash_{QCryptographicHash::Sha256};
     qint64 files_ = 0;

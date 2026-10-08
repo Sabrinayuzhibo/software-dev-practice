@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import select
 import socket
+import stat
 import subprocess
 import sys
 import tempfile
@@ -113,9 +114,15 @@ def tree(root):
     result = {}
     for item in root.rglob("*"):
         relative = item.relative_to(root).as_posix()
-        if item.is_symlink():
-            continue
-        result[relative] = "directory" if item.is_dir() else hashlib.sha256(item.read_bytes()).hexdigest()
+        mode = item.lstat().st_mode
+        if stat.S_ISLNK(mode):
+            result[relative] = ("symlink", os.readlink(os.fsencode(item)))
+        elif stat.S_ISFIFO(mode):
+            result[relative] = "fifo"
+        elif stat.S_ISDIR(mode):
+            result[relative] = "directory"
+        elif stat.S_ISREG(mode):
+            result[relative] = hashlib.sha256(item.read_bytes()).hexdigest()
     return result
 
 
@@ -207,10 +214,12 @@ def run(agent_binary, server_binary):
             (source / "external-link").symlink_to(root / "restore-a")
             os.mkfifo(source / "fifo")
             warning_version = fixture.backup(task["id"])
-            assert len(warning_version["warnings"]) == 2
+            assert not warning_version["warnings"]
+            fixture.restore(warning_version["id"], root / "special-restore")
+            assert tree(root / "special-restore") == tree(source)
             (source / "fifo").unlink()
             (source / "external-link").unlink()
-            passed("unsupported symlink/FIFO reported without following or blocking")
+            passed("symlink/FIFO restored without following links or reading pipe streams")
 
             unreadable = source / "restricted"
             unreadable.write_text("unreadable")

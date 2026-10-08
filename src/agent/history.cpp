@@ -50,6 +50,10 @@ QList<QByteArray> warningLines(const QJsonArray& warnings)
         {
             normalized.insert("severity", "error");
         }
+        if (item.contains("type"))
+        {
+            normalized.insert("type", text(item, "type"));
+        }
         auto line = QJsonDocument(normalized).toJson(QJsonDocument::Compact);
         require(line.size() + 1 < kHistoryPageBytes / 2,
                 "Warning entry exceeds supported size");
@@ -213,13 +217,15 @@ QJsonObject operationSummary(const QJsonObject& record)
 {
     const auto detail = operationDetail(record);
     QJsonObject summary;
-    for (const auto* key : {"id",          "action",         "state",
-                            "started_at",  "finished_at",    "stage",
-                            "files",       "bytes",          "directories",
-                            "task_id",     "target",         "source",
-                            "destination", "path",           "error",
-                            "version_id",  "warning_count",  "error_count",
-                            "complete",    "restore_journal"})
+    for (const auto* key :
+         {"id",          "action",          "state",         "started_at",
+          "finished_at", "stage",           "files",         "bytes",
+          "directories", "task_id",         "target",        "source",
+          "selection",   "file_types",      "preserve_empty_dirs", "source_name",   "destination",   "path",
+          "error",       "version_id",      "warning_count", "error_count",
+          "complete",    "restore_journal", "symlinks",      "hardlinks",
+          "fifos",       "character_devices", "block_devices", "sockets",
+          "stored_bytes", "entries"})
     {
         if (detail.contains(QLatin1String(key)))
         {

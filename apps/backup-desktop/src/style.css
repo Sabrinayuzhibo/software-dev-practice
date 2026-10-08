@@ -522,6 +522,177 @@ td.digest {
 .workflow-dialog h2 {
     font-size: 18px;
 }
+.workflow-dialog:has(.create-task-form) {
+    display: flex;
+    flex-direction: column;
+    width: min(760px, calc(100vw - 40px));
+    overflow: hidden;
+}
+.workflow-dialog:has(.create-task-form) .section-heading {
+    margin-bottom: 14px;
+}
+.create-task-form {
+    display: grid;
+    grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+    gap: 16px;
+    margin-bottom: 14px;
+}
+.create-task-form label {
+    display: grid;
+    gap: 8px;
+    min-width: 0;
+}
+.create-task-form input,
+.create-task-form select {
+    width: 100%;
+}
+.file-type-picker {
+    min-width: 0;
+    margin: 0 0 12px;
+    padding: 14px 0 0;
+    border: 0;
+    border-top: 1px solid #e1e6e3;
+}
+.file-type-picker legend {
+    padding: 0 8px 0 0;
+    font-weight: 600;
+}
+.file-type-options {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 10px 14px;
+}
+.file-type-options label,
+.empty-directory-option {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    min-width: 0;
+    white-space: nowrap;
+    cursor: pointer;
+}
+.file-type-options input[type='checkbox'],
+.empty-directory-option input[type='checkbox'] {
+    width: 16px;
+    height: 16px;
+    min-width: 16px;
+    margin: 0;
+    padding: 0;
+    accent-color: #246c4d;
+}
+.empty-directory-option {
+    margin-top: 0;
+}
+.file-type-secondary {
+    display: flex;
+    align-items: center;
+    gap: 24px;
+    margin-top: 10px;
+}
+.special-type-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 0;
+    border: 0;
+    color: #326695;
+    background: none;
+    cursor: pointer;
+}
+.special-file-types {
+    margin-top: 10px;
+}
+.file-type-summary {
+    color: #326695;
+}
+.workflow-dialog:has(.file-type-picker) .source-list {
+    flex: 0 1 auto;
+    min-height: 112px;
+    max-height: min(220px, 30vh);
+    overflow: auto;
+}
+.workflow-dialog:has(.file-type-picker) .dialog-actions {
+    flex-shrink: 0;
+    margin-top: 14px;
+    padding-top: 12px;
+    border-top: 1px solid #e1e6e3;
+}
+.source-recheck {
+    align-self: flex-start;
+}
+.source-actions {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+.source-actions [role='status'] {
+    margin-left: auto;
+}
+.source-path-input {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin: 8px 0 0;
+}
+.source-path-input input {
+    min-width: 0;
+    width: 100%;
+}
+.source-path-input .icon-button {
+    flex: none;
+}
+.source-empty {
+    padding: 40px 0;
+    text-align: center;
+    color: #748078;
+    border-block: 1px solid #e1e6e3;
+}
+.source-list {
+    max-height: min(300px, 40vh);
+    border-block: 1px solid #e1e6e3;
+}
+.source-list th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+}
+.source-list th:first-child {
+    width: 58%;
+}
+.source-list th:last-child,
+.source-list td:last-child {
+    width: 44px;
+    padding-inline: 6px;
+}
+.source-item-name {
+    display: flex;
+    align-items: flex-start;
+    gap: 7px;
+    overflow-wrap: anywhere;
+}
+.source-item-name svg {
+    flex: none;
+    color: #587384;
+}
+.source-details {
+    color: #326695;
+    margin-top: 4px;
+    min-width: 0;
+}
+.source-details ul {
+    margin: 8px 0;
+    padding-left: 18px;
+    max-height: 220px;
+    overflow: auto;
+}
+.source-details li {
+    margin-block: 8px;
+    overflow-wrap: anywhere;
+}
+.source-details small {
+    margin-top: 2px;
+}
 .dialog-actions {
     display: flex;
     justify-content: flex-end;
@@ -669,5 +840,18 @@ summary {
     .task-actions {
         width: 100%;
         justify-content: flex-end;
+    }
+}
+@media (max-width: 520px) {
+    .create-task-form {
+        grid-template-columns: minmax(0, 1fr);
+    }
+    .workflow-dialog {
+        padding: 16px;
+    }
+}
+@media (max-width: 650px) {
+    .file-type-options {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 }

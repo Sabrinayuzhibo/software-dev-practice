@@ -7,6 +7,7 @@ import sys
 import tempfile
 
 from backup_integration import Fixture, stop
+from file_type_fixtures import create_socket
 
 
 def warning_pages(fixture, operation_id):
@@ -132,7 +133,7 @@ def run(agent_binary, server_binary):
                 nested /= f"{index:02}-" + "x" * 175
                 nested.mkdir()
             for index in range(420):
-                (nested / f"link-{index:03}").symlink_to("missing")
+                create_socket(nested / f"link-{index:03}")
             task = fixture.request("add_task", {"path": str(source), "target_id": "local"})
 
             def scan():
@@ -157,7 +158,7 @@ def run(agent_binary, server_binary):
                             if item["path"] == "data.txt")
 
             assert content_hash(first) != content_hash(second)
-            (nested / "new-link").symlink_to("missing")
+            create_socket(nested / "new-link")
             third, third_stored = scan()
             assert third["warning_count"] == 421
             assert third_stored["warning_ref"] != first_stored["warning_ref"]
@@ -168,7 +169,7 @@ def run(agent_binary, server_binary):
             assert fixture.request("ping", {"target_id": "local"})
             print("PASS: warnings over 1 MiB paginate by bytes; repeated scans share details but preserve changed file results", flush=True)
             for index in range(400):
-                (nested / f"extra-{index:03}").symlink_to("missing")
+                create_socket(nested / f"extra-{index:03}")
             agent_pid = fixture.agent.pid
             failure = fixture.request("scan", {"task_id": task["id"]}, ok=False)
             assert "Response too large" in failure["message"]

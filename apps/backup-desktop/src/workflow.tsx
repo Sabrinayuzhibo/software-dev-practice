@@ -12,15 +12,18 @@ import type { ConsoleModel } from './use-backup-console'
 import { WarningDetails } from './warning-details'
 import { RestoreDetails } from './restore-details'
 import { OperationConnection } from './operation-connection'
+import { SourceDetails, sourceLabel, taskTitle } from './source-scope'
+import { FileTypeSummary } from './file-type-filter'
 import {
     actionLabels,
     formatBytes,
     formatTime,
     stageLabels,
     stateLabels,
+    specialEntryCounts,
 } from './ui'
 
-function Dialog({
+export function Dialog({
     title,
     onClose,
     children,
@@ -40,7 +43,10 @@ function Dialog({
             ref={ref}
             className="workflow-dialog"
             aria-labelledby="dialog-title"
-            onCancel={onClose}
+            onCancel={(event) => {
+                event.preventDefault()
+                onClose()
+            }}
         >
             <div className="section-heading">
                 <h2 id="dialog-title">{title}</h2>
@@ -68,7 +74,21 @@ export function WorkflowDialogs({ model }: { model: ConsoleModel }) {
                     title="移除备份任务"
                     onClose={() => model.setRemoveCandidate(null)}
                 >
-                    <p className="path">{removeCandidate.path}</p>
+                    <p className="path">{taskTitle(removeCandidate)}</p>
+                    <p className="path">
+                        {sourceLabel(
+                            removeCandidate.path,
+                            removeCandidate.selection,
+                        )}
+                    </p>
+                    <SourceDetails
+                        root={removeCandidate.path}
+                        selection={removeCandidate.selection}
+                    />
+                    <FileTypeSummary
+                        types={removeCandidate.file_types}
+                        preserveEmptyDirs={removeCandidate.preserve_empty_dirs}
+                    />
                     <p>只移除任务配置，源文件和已完成的备份版本都会保留。</p>
                     <div className="dialog-actions">
                         <button
@@ -96,12 +116,37 @@ export function WorkflowDialogs({ model }: { model: ConsoleModel }) {
                     <dl className="restore-summary">
                         <dt>备份时间</dt>
                         <dd>{formatTime(restoreCandidate.completed_at)}</dd>
-                        <dt>源目录</dt>
-                        <dd className="path">{restoreCandidate.source}</dd>
+                        <dt>备份来源</dt>
+                        <dd className="path">
+                            {restoreCandidate.source_name && (
+                                <strong>{restoreCandidate.source_name}</strong>
+                            )}
+                            <div>
+                                {sourceLabel(
+                                    restoreCandidate.source,
+                                    restoreCandidate.selection,
+                                )}
+                            </div>
+                            <SourceDetails
+                                root={restoreCandidate.source}
+                                selection={restoreCandidate.selection}
+                            />
+                            <FileTypeSummary
+                                types={restoreCandidate.file_types}
+                                preserveEmptyDirs={
+                                    restoreCandidate.preserve_empty_dirs
+                                }
+                            />
+                        </dd>
                         <dt>备份内容</dt>
                         <dd>
                             {restoreCandidate.files} 个文件 ·{' '}
                             {formatBytes(restoreCandidate.bytes)}
+                            {specialEntryCounts(restoreCandidate) && (
+                                <small>
+                                    {specialEntryCounts(restoreCandidate)}
+                                </small>
+                            )}
                         </dd>
                     </dl>
                     <label className="restore-location">
@@ -126,7 +171,7 @@ export function WorkflowDialogs({ model }: { model: ConsoleModel }) {
                         </div>
                     </label>
                     <p className="muted">
-                        目标必须为空，不能与源目录或备份仓库重叠。
+                        目标必须为空，不能与备份来源或仓库重叠。
                     </p>
                     {model.message && (
                         <p className="error-text" role="alert">
@@ -201,7 +246,27 @@ export function OperationPanel({
             </div>
             {running && !lost && <progress aria-label="操作进行中" />}
             <OperationConnection id={detail.id} model={model} />
-            <p className="path">{detail.destination || detail.source}</p>
+            {detail.source_name && (
+                <p className="operation-source-name">{detail.source_name}</p>
+            )}
+            <p className="path">
+                {detail.destination ||
+                    (detail.source &&
+                        sourceLabel(detail.source, detail.selection))}
+            </p>
+            {detail.source && (
+                <SourceDetails
+                    root={detail.source}
+                    selection={detail.selection}
+                />
+            )}
+            <FileTypeSummary
+                types={detail.file_types}
+                preserveEmptyDirs={detail.preserve_empty_dirs}
+            />
+            {specialEntryCounts(detail) && (
+                <p className="muted">{specialEntryCounts(detail)}</p>
+            )}
             {running && detail.path && (
                 <small className="path">{detail.path}</small>
             )}

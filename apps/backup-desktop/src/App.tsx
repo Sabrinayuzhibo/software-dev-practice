@@ -40,7 +40,7 @@ export default function App() {
         refreshConnection,
     } = model
     const tabs = [
-        { id: 'tasks', title: '目录任务', icon: Folder },
+        { id: 'tasks', title: '备份任务', icon: Folder },
         { id: 'versions', title: '备份版本', icon: Archive },
         { id: 'records', title: '执行记录', icon: ListChecks },
         { id: 'targets', title: '备份目标', icon: Settings },

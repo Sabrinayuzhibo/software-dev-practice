@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type {
     BackupTask,
     Configuration,
+    ContentFileType,
     Operation,
     Target,
     Version,
@@ -357,12 +358,17 @@ export function useBackupConsole() {
     }
 
     async function scanTask(taskId: string) {
+        const task = config.tasks.find((item) => item.id === taskId)
         clearScan(taskId)
         setPreparingScanId(taskId)
         await run(() => window.backup.scanTask(taskId), '正在准备扫描', {
             action: 'scan',
             task_id: taskId,
-            source: config.tasks.find((item) => item.id === taskId)?.path,
+            source: task?.path,
+            source_name: task?.name,
+            selection: task?.selection,
+            file_types: task?.file_types,
+            preserve_empty_dirs: task?.preserve_empty_dirs,
         })
         setPreparingScanId(null)
     }
@@ -376,12 +382,17 @@ export function useBackupConsole() {
     }
 
     async function backupTask(taskId: string) {
+        const task = config.tasks.find((item) => item.id === taskId)
         clearBackup(taskId)
         setPreparingBackupId(taskId)
         await run(() => window.backup.backupTask(taskId), '正在准备备份', {
             action: 'backup',
             task_id: taskId,
-            source: config.tasks.find((item) => item.id === taskId)?.path,
+            source: task?.path,
+            source_name: task?.name,
+            selection: task?.selection,
+            file_types: task?.file_types,
+            preserve_empty_dirs: task?.preserve_empty_dirs,
         })
         setPreparingBackupId(null)
     }
@@ -391,7 +402,14 @@ export function useBackupConsole() {
         label: string,
         context: Pick<
             Operation,
-            'action' | 'task_id' | 'source' | 'destination'
+            | 'action'
+            | 'task_id'
+            | 'source'
+            | 'destination'
+            | 'selection'
+            | 'file_types'
+            | 'preserve_empty_dirs'
+            | 'source_name'
         >,
     ) {
         setMessage('')
@@ -431,14 +449,33 @@ export function useBackupConsole() {
         }
     }
 
-    async function addFolder() {
+    async function createTask(
+        paths: string[],
+        destinationId: string,
+        name: string,
+        fileTypes: ContentFileType[],
+        preserveEmptyDirs: boolean,
+    ) {
         setMutating(true)
         setMessage('')
         try {
-            await window.backup.addFolder(targetId)
+            const created = await window.backup.createTask(
+                paths,
+                destinationId,
+                name,
+                fileTypes,
+                preserveEmptyDirs,
+            )
+            const existing = config.tasks.some((item) => item.id === created.id)
             setConfig(await window.backup.getConfig())
-        } catch (error) {
-            setMessage(String(error))
+            if (targetId !== destinationId) {
+                selectTarget(destinationId)
+            }
+            setMessage(
+                existing
+                    ? '相同备份范围的任务已存在，已保留原任务。'
+                    : '备份任务已创建',
+            )
         } finally {
             setMutating(false)
         }
@@ -657,7 +694,7 @@ export function useBackupConsole() {
         refreshConnection,
         loadRecords,
         loadVersions,
-        addFolder,
+        createTask,
         removeTask,
         saveTarget,
         showRecord,

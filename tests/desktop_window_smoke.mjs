@@ -9,7 +9,6 @@ import {
     readFile,
     writeFile,
     readdir,
-    symlink,
     rm,
 } from 'node:fs/promises'
 import { createServer } from 'node:net'
@@ -18,6 +17,9 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { setTimeout as delay } from 'node:timers/promises'
 import { checkP0 } from './desktop_p0_checks.mjs'
+import { checkFileTypes } from './desktop_file_types.mjs'
+import { checkSources, createFolderTask } from './desktop_sources.mjs'
+import { checkTypeFilter } from './desktop_type_filter.mjs'
 
 const root = fileURLToPath(new URL('../', import.meta.url))
 const execute = promisify(execFile)
@@ -58,13 +60,11 @@ const restoreDirectory = join(temporary, 'restored')
 await mkdir(join(sourceDirectory, 'empty'), { recursive: true })
 await mkdir(secondSourceDirectory, { recursive: true })
 await writeFile(join(secondSourceDirectory, 'second.txt'), 'second task\n')
-await symlink('second.txt', join(secondSourceDirectory, 'skip.link'))
-for (let index = 0; index < 200; index++) {
-    await symlink(
-        'second.txt',
-        join(secondSourceDirectory, `skip-${index}.link`),
-    )
-}
+await execute('python3', [
+    join(root, 'tests/file_type_fixtures.py'),
+    secondSourceDirectory,
+    '201',
+])
 await mkdir(restoreDirectory)
 await writeFile(
     join(sourceDirectory, '中文 file.txt'),
@@ -389,9 +389,15 @@ try {
         const before = await main.evaluate('folderRequests')
         await click('.primary-button')
         await until(
+            () => page.evaluate("!!document.querySelector('.choose-folders')"),
+            'source dialog',
+        )
+        await click('.choose-folders')
+        await until(
             () => main.evaluate(`folderRequests === ${before + 1}`),
             'directory chooser IPC',
         )
+        await click('[aria-label="关闭对话框"]')
         await click('.window-control:nth-child(2)')
         await until(() => main.evaluate('!testWindow.isMaximized()'), 'restore')
         await until(
@@ -420,7 +426,7 @@ try {
     await main.evaluate(`testElectron.dialog.showOpenDialog = async () => ({
     canceled: false, filePaths: [${JSON.stringify(sourceDirectory)}]
   })`)
-    await click('.primary-button')
+    await createFolderTask({ page, click, until })
     await until(
         () =>
             page.evaluate(
@@ -739,7 +745,7 @@ try {
     await main.evaluate(
         `testElectron.dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [${JSON.stringify(secondSourceDirectory)}] })`,
     )
-    await click('.primary-button')
+    await createFolderTask({ page, click, until })
     await until(
         () =>
             page.evaluate(
@@ -1326,6 +1332,9 @@ try {
     console.log(
         'PASS: real task/backup/version/restore/records/reload and 850px layout; desktop screenshots in /tmp',
     )
+    await checkFileTypes({ page, main, click, until, temporary })
+    await checkSources({ page, main, click, until, temporary })
+    await checkTypeFilter({ page, main, click, until, temporary })
     await page.evaluate(`
     globalThis.windowTestClicks = [];
     document.addEventListener('click', event => {
@@ -1379,7 +1388,10 @@ try {
         console.error(
             'PAGE STATE',
             await page.evaluate(
-                '({ visibility: document.visibilityState, focused: document.hasFocus() })',
+                `({ visibility: document.visibilityState, focused: document.hasFocus(),
+                    dialog: document.querySelector('dialog[open]')?.textContent,
+                    operation: document.querySelector('.operation-panel')?.textContent,
+                    message: document.querySelector('.message-banner')?.textContent })`,
             ),
         )
         if (nativeInput)

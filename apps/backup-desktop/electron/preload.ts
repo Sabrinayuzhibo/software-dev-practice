@@ -8,6 +8,36 @@ contextBridge.exposeInMainWorld('backup', {
     listTasks: () => ipcRenderer.invoke('tasks:list'),
     addFolder: (targetId = 'local') =>
         ipcRenderer.invoke('tasks:add-folder', targetId),
+    chooseSources: (kind: 'files' | 'folders') =>
+        ipcRenderer.invoke('sources:choose', kind),
+    previewSources: (
+        paths: string[],
+        targetId: string,
+        fileTypes: string[],
+        preserveEmptyDirs: boolean,
+    ) =>
+        ipcRenderer.invoke(
+            'sources:preview',
+            paths,
+            targetId,
+            fileTypes,
+            preserveEmptyDirs,
+        ),
+    createTask: (
+        paths: string[],
+        targetId: string,
+        name: string,
+        fileTypes: string[],
+        preserveEmptyDirs: boolean,
+    ) =>
+        ipcRenderer.invoke(
+            'tasks:create',
+            paths,
+            targetId,
+            name,
+            fileTypes,
+            preserveEmptyDirs,
+        ),
     removeTask: (id: string) => ipcRenderer.invoke('tasks:remove', id),
     scanTask: (id: string) => ipcRenderer.invoke('tasks:scan', id),
     backupTask: (id: string) => ipcRenderer.invoke('tasks:backup', id),

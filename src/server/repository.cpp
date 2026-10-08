@@ -1,15 +1,14 @@
 #include "backup/server/repository.h"
 #include "backup/core/detail_page.h"
 #include "backup/core/io.h"
+#include "backup/core/source_scope.h"
 
 #include <QDir>
 #include <QFileInfo>
 #include <QJsonDocument>
-#include <QRegularExpression>
 #include <QTemporaryFile>
 #include <algorithm>
 #include <filesystem>
-#include <limits>
 
 namespace backup::server
 {
@@ -97,8 +96,15 @@ QString Repository::versionPath(const QString& id) const
 QJsonObject Repository::version(const QString& id) const
 {
     auto result = readObject(versionPath(id) + "/summary.json");
-    require(result.value("format").toInt() == 1 && result.value("id") == id,
+    require(supportedVersionFormat(result.value("format").toInt()) &&
+                result.value("id") == id,
             "Unsupported or corrupt version");
+    const SourceScope scope(result, "source");
+    require(result.value("format").toInt() >= 3 ||
+                (!scope.fileTypes().contains("character_device") &&
+                 !scope.fileTypes().contains("block_device") &&
+                 !scope.fileTypes().contains("socket")),
+            "Version format does not support saved node types");
     if (result.contains("warnings"))
     {
         require(result.value("warnings").isArray(), "Invalid version warnings");
@@ -113,7 +119,8 @@ QJsonObject Repository::warnings(const QJsonObject& request) const
 {
     const auto id = text(request, "version_id");
     const auto summary = readObject(versionPath(id) + "/summary.json");
-    require(summary.value("format").toInt() == 1 && summary.value("id") == id &&
+    require(supportedVersionFormat(summary.value("format").toInt()) &&
+                summary.value("id") == id &&
                 (!summary.contains("warnings") ||
                  summary.value("warnings").isArray()),
             "Unsupported or corrupt version");
@@ -222,25 +229,49 @@ QJsonObject Repository::begin(const QJsonObject& request)
     const QString finalPath = versionPath(id);
     require(activeId_.isEmpty(), "Repository is busy");
     require(!QFileInfo::exists(finalPath), "Operation already committed");
-    const QString source = canonicalPath(text(request, "source"));
-    require(!overlaps(source, root_), "Source overlaps repository");
+    const SourceScope source(request, "source");
+    require(!source.overlaps(root_), "Source overlaps repository");
     require(validId(text(request, "task_id")), "Invalid task identifier");
+    if (request.contains("source_name"))
+    {
+        require(text(request, "source_name").size() <= 120,
+                "Task name is too long");
+    }
     stagingPath_ = root_ + "/storage/staging/" + id;
     require(!QFileInfo::exists(stagingPath_),
             "Operation already exists; use a new operation");
     makeDirectory(stagingPath_);
-    summary_ = {{"format", 1},
+    summary_ = {{"format", kVersionFormat},
                 {"id", id},
                 {"task_id", request.value("task_id")},
-                {"source", source},
+                {"source", source.root()},
                 {"started_at", now()},
                 {"rules", QJsonObject{}}};
-    files_ = 0;
-    directoriesCount_ = 0;
-    bytes_ = 0;
-    entryCount_ = 0;
-    paths_.clear();
-    directories_.clear();
+    if (!source.fileTypes().isEmpty())
+    {
+        summary_.insert("file_types", source.fileTypes());
+        summary_.insert("rules", QJsonObject{{"file_types", source.fileTypes()}});
+    }
+    if (source.hasEmptyDirectoryRule())
+    {
+        summary_.insert("preserve_empty_dirs",
+                        source.preservesEmptyDirectories());
+        auto rules = summary_.value("rules").toObject();
+        rules.insert("preserve_empty_dirs",
+                     source.preservesEmptyDirectories());
+        summary_.insert("rules", rules);
+    }
+    if (!source.selection().isEmpty())
+    {
+        summary_.insert("selection", source.selection());
+    }
+    if (request.contains("source_name"))
+    {
+        const auto name = text(request, "source_name");
+        summary_.insert("source_name", name);
+    }
+    entries_ = {};
+    source_ = source;
     fileHash_.reset();
     manifestHash_.reset();
     warningHash_.reset();
@@ -261,46 +292,67 @@ QJsonObject Repository::begin(const QJsonObject& request)
         throw;
     }
     activeId_ = id;
-    return {{"version_id", id}};
+    QJsonObject receipt{{"version_id", id}};
+    if (!source.selection().isEmpty())
+    {
+        receipt.insert("selection", source.selection());
+    }
+    if (!source.fileTypes().isEmpty())
+    {
+        receipt.insert("file_types", source.fileTypes());
+    }
+    if (source.hasEmptyDirectoryRule())
+    {
+        receipt.insert("preserve_empty_dirs",
+                       source.preservesEmptyDirectories());
+    }
+    return receipt;
 }
 
 void Repository::recordEntry(const QJsonObject& entry)
 {
+    entries_.append(entry);
     const auto line =
         QJsonDocument(entry).toJson(QJsonDocument::Compact) + '\n';
     writeAll(manifest_, line);
     manifestHash_.addData(line);
-    ++entryCount_;
 }
 
 void Repository::addEntry(const QJsonObject& entry)
 {
     require(!activeId_.isEmpty() && !content_.isOpen(), "Invalid upload state");
     const QString path = text(entry, "path");
-    require(validPath(path) && !paths_.contains(path),
-            "Unsafe or duplicate path: " + path);
-    const auto slash = path.lastIndexOf('/');
-    require(slash < 0 || directories_.contains(path.left(slash)),
-            "Missing parent directory");
+    entries_.checkPath(path);
     const QString type = text(entry, "type");
-    require(type == "file" || type == "directory", "Unsupported entry type");
-    paths_.insert(path);
+    require(supportedEntryType(type), "Unsupported entry type");
+    require(source_ && source_->allows(path, type),
+            "Entry is outside the selected sources: " + path);
     currentEntry_ = {{"path", path},
                      {"type", type},
-                     {"index", QString::number(entryCount_)}};
-    if (type == "directory")
+                     {"index", QString::number(entries_.count())}};
+    for (const auto* key : {"link_group", "link_to", "target_base64",
+                            "device_major", "device_minor"})
     {
-        directories_.insert(path);
-        ++directoriesCount_;
+        if (entry.contains(QLatin1String(key)))
+        {
+            currentEntry_.insert(QLatin1String(key),
+                                 entry.value(QLatin1String(key)));
+        }
+    }
+    if (type == "hardlink")
+    {
+        currentEntry_.insert("size", QString::number(number(entry, "size")));
+        currentEntry_.insert("sha256", text(entry, "sha256"));
+    }
+    if (type != "file")
+    {
         recordEntry(currentEntry_);
         return;
     }
     const qint64 size = number(entry, "size");
-    require(size <= std::numeric_limits<qint64>::max() - bytes_,
-            "Version too large");
     currentEntry_.insert("size", QString::number(size));
-    content_.setFileName(stagingPath_ + '/' + QString::number(entryCount_) +
-                         ".data");
+    content_.setFileName(stagingPath_ + '/' +
+                         QString::number(entries_.count()) + ".data");
     require(content_.open(QIODevice::WriteOnly | QIODevice::NewOnly),
             "Cannot create content");
     fileHash_.reset();
@@ -334,8 +386,6 @@ void Repository::finishFile(const QString& digest)
     content_.close();
     currentEntry_.insert("sha256", digest);
     recordEntry(currentEntry_);
-    ++files_;
-    bytes_ += number(currentEntry_, "size");
 }
 
 void Repository::appendWarnings(const QJsonObject& request)
@@ -349,8 +399,13 @@ void Repository::appendWarnings(const QJsonObject& request)
     for (const auto& value : items)
     {
         const auto warning = value.toObject();
-        const auto line = detailLine({{"path", text(warning, "path")},
-                                      {"reason", text(warning, "reason")}});
+        QJsonObject normalized{{"path", text(warning, "path")},
+                               {"reason", text(warning, "reason")}};
+        if (warning.contains("type"))
+        {
+            normalized.insert("type", text(warning, "type"));
+        }
+        const auto line = detailLine(normalized);
         writeAll(warnings_, line);
         warningHash_.addData(line);
         ++warningCount_;
@@ -360,6 +415,19 @@ void Repository::appendWarnings(const QJsonObject& request)
 QJsonObject Repository::commit(const QString& id, const QJsonArray& warnings)
 {
     require(activeId_ == id && !content_.isOpen(), "Incomplete upload");
+    if (source_->hasEmptyDirectoryRule() &&
+        !source_->preservesEmptyDirectories())
+    {
+        entries_.requirePopulatedDirectories();
+    }
+    for (const auto& value : summary_.value("selection").toArray())
+    {
+        const auto path = text(value.toObject(), "path");
+        require((value.toObject().value("type") == "directory" &&
+                 !source_->includes("directory")) ||
+                    entries_.contains(path),
+                "Selected source missing from upload: " + path);
+    }
     // Accept the original commit interface for existing clients.
     require(warnings.isEmpty() || warningCount_ == 0,
             "Warnings already uploaded");
@@ -372,10 +440,11 @@ QJsonObject Repository::commit(const QString& id, const QJsonArray& warnings)
         offset += items.size();
     }
     summary_.insert("completed_at", now());
-    summary_.insert("files", QString::number(files_));
-    summary_.insert("directories", QString::number(directoriesCount_));
-    summary_.insert("bytes", QString::number(bytes_));
-    summary_.insert("entries", QString::number(entryCount_));
+    const auto totals = entries_.totals();
+    for (auto item = totals.begin(); item != totals.end(); ++item)
+    {
+        summary_.insert(item.key(), item.value());
+    }
     summary_.insert("manifest_sha256",
                     QString::fromLatin1(manifestHash_.result().toHex()));
     summary_.insert("warning_count", warningCount_);

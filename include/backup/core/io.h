@@ -5,6 +5,7 @@
 #include <QJsonObject>
 #include <QString>
 #include <stdexcept>
+#include <sys/stat.h>
 
 namespace backup::core
 {
@@ -53,4 +54,7 @@ class Descriptor
 // Opens each path component without following links; caller owns returned fd.
 int openBelow(int root, const QString& path, int flags, int mode = 0600);
 bool isEmptyDirectory(int descriptor);
+// Inspects a path without opening device/FIFO streams or following a link.
+struct stat statBelow(int root, const QString& path);
+bool sameFileState(const struct stat& first, const struct stat& second);
 } // namespace backup::core

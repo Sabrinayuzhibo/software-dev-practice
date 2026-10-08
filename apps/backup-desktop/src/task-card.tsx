@@ -1,5 +1,7 @@
 import {
     Archive,
+    File,
+    Files,
     Folder,
     RefreshCw,
     ScanLine,
@@ -11,6 +13,9 @@ import type { ConsoleModel } from './use-backup-console'
 import { ScanPreview, formatBytes, formatTime, stateLabels } from './ui'
 import { OperationPanel } from './workflow'
 import { OperationConnection } from './operation-connection'
+import { SourceDetails, sourceLabel, taskTitle } from './source-scope'
+import { entryTypeLabels } from './ui'
+import { FileTypeSummary } from './file-type-filter'
 
 export function TaskCard({
     task,
@@ -39,6 +44,11 @@ export function TaskCard({
         (record) => record.task_id === task.id && record.action === 'backup',
     )
     const titleId = `task-${task.id}`
+    const SourceIcon = !task.selection
+        ? Folder
+        : task.selection.length > 1
+          ? Files
+          : File
     const backup = () => void model.backupTask(task.id)
     return (
         <article
@@ -47,12 +57,27 @@ export function TaskCard({
             aria-labelledby={titleId}
         >
             <header className="task-header">
-                <Folder className="folder-icon" size={22} />
+                <SourceIcon className="folder-icon" size={22} />
                 <div className="task-copy">
-                    <h2 id={titleId}>
-                        {task.path.split('/').pop() || task.path}
-                    </h2>
-                    <span className="path">{task.path}</span>
+                    <h2 id={titleId}>{taskTitle(task)}</h2>
+                    <span className="path">
+                        {sourceLabel(task.path, task.selection)}
+                    </span>
+                    <small>
+                        {!task.selection
+                            ? '文件夹'
+                            : task.selection.length === 1
+                              ? entryTypeLabels[task.selection[0].type]
+                              : `${task.selection.length} 项来源`}
+                    </small>
+                    <FileTypeSummary
+                        types={task.file_types}
+                        preserveEmptyDirs={task.preserve_empty_dirs}
+                    />
+                    <SourceDetails
+                        root={task.path}
+                        selection={task.selection}
+                    />
                     <small>
                         {latest
                             ? `最近备份：${stateLabels[latest.state]} · ${formatTime(latest.started_at)}`
@@ -82,7 +107,7 @@ export function TaskCard({
                         className="backup-button"
                         disabled={busy || !model.canBackup}
                         title={
-                            !model.canBackup ? connection.detail : '备份此目录'
+                            !model.canBackup ? connection.detail : '备份此任务'
                         }
                         onClick={backup}
                     >
@@ -99,8 +124,8 @@ export function TaskCard({
                     </button>
                     <button
                         className="icon-button task-versions"
-                        title="查看此目录的备份版本"
-                        aria-label="查看此目录的备份版本"
+                        title="查看此任务的备份版本"
+                        aria-label="查看此任务的备份版本"
                         disabled={busy}
                         onClick={() => model.viewVersions(task)}
                     >
@@ -158,7 +183,7 @@ export function TaskCard({
                                     onClick={backup}
                                 >
                                     <Upload size={16} />
-                                    备份此目录
+                                    备份此任务
                                 </button>
                             </div>
                         </>

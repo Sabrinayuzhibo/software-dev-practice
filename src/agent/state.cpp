@@ -1,5 +1,7 @@
 #include "backup/agent/state.h"
+#include "backup/agent/source_selection.h"
 #include "backup/core/io.h"
+#include "backup/core/source_scope.h"
 
 #include <QDir>
 #include <QFileInfo>
@@ -51,7 +53,8 @@ State::State(const QString& directory) : directory_(canonicalPath(directory))
     if (QFileInfo::exists(path))
     {
         config_ = readObject(path);
-        require(config_.value("format").toInt() == 1 &&
+        require((config_.value("format").toInt() >= 1 &&
+                 config_.value("format").toInt() <= 5) &&
                     config_.value("tasks").isArray() &&
                     config_.value("targets").isArray(),
                 "Invalid Agent configuration; original file preserved");
@@ -77,6 +80,25 @@ State::State(const QString& directory) : directory_(canonicalPath(directory))
                         targetIds.contains(text(item, "target_id")),
                     "Invalid saved task");
             taskIds.insert(id);
+            const SourceScope scope(item);
+            require(scope.selection().isEmpty() ||
+                        config_.value("format").toInt() >= 2,
+                    "Selected sources require configuration format 2");
+            require(scope.fileTypes().isEmpty() ||
+                        config_.value("format").toInt() >= 3,
+                    "File type filters require configuration format 3");
+            require(!scope.hasEmptyDirectoryRule() ||
+                        config_.value("format").toInt() >= 4,
+                    "Empty directory rules require configuration format 4");
+            require((!scope.fileTypes().contains("character_device") &&
+                     !scope.fileTypes().contains("block_device") &&
+                     !scope.fileTypes().contains("socket")) ||
+                        config_.value("format").toInt() >= 5,
+                    "Device and socket filters require configuration format 5");
+            require(!item.contains("name") ||
+                        (item.value("name").isString() &&
+                         item.value("name").toString().size() <= 120),
+                    "Invalid saved task name");
         }
     }
     else
@@ -158,13 +180,15 @@ void State::save(const QJsonObject& next)
     config_ = next;
 }
 
-QJsonObject State::addTask(const QJsonObject& args)
+QJsonObject State::prepareTask(const QJsonObject& args) const
 {
-    const QString source = canonicalPath(text(args, "path"));
-    require(QFileInfo(source).isDir(), "Source directory does not exist");
-    require(!overlaps(source, directory_), "Source overlaps Agent state");
-    const QString targetId = text(args, "target_id");
-    const auto destination = target(targetId);
+    require(args.value("sources").isArray(), "Invalid source list");
+    const auto plan = prepareSources(args.value("sources").toArray(),
+                                     args.value("file_types"),
+                                     args.value("preserve_empty_dirs"));
+    const SourceScope scope(plan.value("scope").toObject());
+    target(text(args, "target_id"));
+    require(!scope.overlaps(directory_), "Source overlaps Agent state");
     for (const auto& value : config_.value("targets").toArray())
     {
         const auto repository = value.toObject();
@@ -172,17 +196,36 @@ QJsonObject State::addTask(const QJsonObject& args)
         {
             if (repository.contains(QLatin1String(field)))
             {
-                require(
-                    !overlaps(source, canonicalPath(text(repository, field))),
-                    "Source overlaps repository");
+                require(!scope.overlaps(canonicalPath(text(repository, field))),
+                        "Source overlaps repository");
             }
         }
     }
+    return plan;
+}
+
+QJsonObject State::addTask(const QJsonObject& args)
+{
+    auto input = args;
+    if (!args.contains("sources"))
+    {
+        const auto path = canonicalPath(text(args, "path"));
+        require(QFileInfo(path).isDir(), "Source directory does not exist");
+        input.insert("sources", QJsonArray{path});
+    }
+    const auto planned = prepareTask(input).value("scope").toObject();
+    const SourceScope scope(planned);
+    const QString targetId = text(args, "target_id");
+    const auto destination = target(targetId);
+    require(!args.contains("name") ||
+                (args.value("name").isString() &&
+                 args.value("name").toString().size() <= 120),
+            "Task name must be at most 120 characters");
     auto tasks = config_.value("tasks").toArray();
     for (const auto& item : tasks)
     {
         const auto existing = item.toObject();
-        if (existing.value("path") == source &&
+        if (SourceScope(existing).json() == scope.json() &&
             sameRepository(target(text(existing, "target_id")), destination))
         {
             require(existing.value("target_id") == targetId,
@@ -191,13 +234,39 @@ QJsonObject State::addTask(const QJsonObject& args)
             return existing;
         }
     }
-    const QJsonObject created{{"id", newId()},
-                              {"path", source},
-                              {"target_id", targetId},
-                              {"createdAt", now()}};
+    auto created = scope.json();
+    created.insert("id", newId());
+    created.insert("target_id", targetId);
+    created.insert("createdAt", now());
+    const auto name = args.value("name").toString().trimmed();
+    if (!name.isEmpty())
+    {
+        created.insert("name", name);
+    }
     tasks.append(created);
     auto next = config_;
     next.insert("tasks", tasks);
+    if (scope.fileTypes().contains("character_device") ||
+        scope.fileTypes().contains("block_device") ||
+        scope.fileTypes().contains("socket"))
+    {
+        next.insert("format", 5);
+    }
+    else if (scope.hasEmptyDirectoryRule() &&
+             next.value("format").toInt() < 4)
+    {
+        next.insert("format", 4);
+    }
+    else if (!scope.fileTypes().isEmpty() &&
+             next.value("format").toInt() < 3)
+    {
+        next.insert("format", 3);
+    }
+    else if (!scope.selection().isEmpty() &&
+             next.value("format").toInt() < 2)
+    {
+        next.insert("format", 2);
+    }
     save(next);
     return created;
 }
@@ -208,6 +277,9 @@ QJsonObject State::importTasks(const QJsonArray& imported)
     for (const auto& value : imported)
     {
         auto item = value.toObject();
+        require(!item.contains("selection") && !item.contains("file_types") &&
+                    !item.contains("preserve_empty_dirs"),
+                "Legacy tasks must use whole directories; original preserved");
         const QString id = text(item, "id");
         require(validId(id), "Invalid legacy task identifier");
         const QString source = canonicalPath(text(item, "path"));
@@ -218,13 +290,15 @@ QJsonObject State::importTasks(const QJsonArray& imported)
             const auto saved = savedValue.toObject();
             if (saved.value("id") == id)
             {
-                require(saved.value("path") == source,
+                require(saved.value("path") == source &&
+                            !saved.contains("selection"),
                         "Conflicting legacy task; original preserved");
                 present = true;
             }
             else
             {
-                require(saved.value("path") != source ||
+                require(saved.contains("selection") ||
+                            saved.value("path") != source ||
                             saved.value("target_id") != "local",
                         "Duplicate legacy source; original preserved");
             }
@@ -286,8 +360,7 @@ QJsonObject State::configure(const QString& action, const QJsonObject& args)
             const auto root = canonicalPath(repository);
             for (const auto& task : config_.value("tasks").toArray())
             {
-                require(!overlaps(root,
-                                  canonicalPath(text(task.toObject(), "path"))),
+                require(!SourceScope(task.toObject()).overlaps(root),
                         "Repository overlaps a configured source");
             }
             value.insert("repository_path", root);
@@ -304,8 +377,7 @@ QJsonObject State::configure(const QString& action, const QJsonObject& args)
             {
                 const auto other = second.toObject();
                 if (other.value("target_id") != id &&
-                    canonicalPath(text(other, "path")) ==
-                        canonicalPath(text(task, "path")))
+                    SourceScope(other).json() == SourceScope(task).json())
                 {
                     require(!sameRepository(value,
                                             target(text(other, "target_id"))),

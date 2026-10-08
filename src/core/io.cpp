@@ -217,7 +217,9 @@ int openBelow(int root, const QString& path, int flags, int mode)
     for (qsizetype index = 0; index < components.size(); ++index)
     {
         const bool last = index == components.size() - 1;
-        const int options = last ? flags : O_RDONLY | O_DIRECTORY;
+        // Intermediate directories only need search permission; listing is
+        // requested explicitly by callers that actually enumerate a folder.
+        const int options = last ? flags : O_PATH | O_DIRECTORY;
         Descriptor next(::openat(current.get(),
                                  components[index].toUtf8().constData(),
                                  options | O_NOFOLLOW | O_CLOEXEC, mode));
@@ -254,5 +256,25 @@ bool isEmptyDirectory(int descriptor)
             return false;
         }
     }
+}
+
+struct stat statBelow(int root, const QString& path)
+{
+    Descriptor entry(openBelow(root, path, O_PATH));
+    struct stat info
+    {
+    };
+    require(::fstat(entry.get(), &info) == 0, "Cannot inspect: " + path);
+    return info;
+}
+
+bool sameFileState(const struct stat& first, const struct stat& second)
+{
+    return first.st_dev == second.st_dev && first.st_ino == second.st_ino &&
+           first.st_mode == second.st_mode && first.st_size == second.st_size &&
+           first.st_mtim.tv_sec == second.st_mtim.tv_sec &&
+           first.st_mtim.tv_nsec == second.st_mtim.tv_nsec &&
+           first.st_ctim.tv_sec == second.st_ctim.tv_sec &&
+           first.st_ctim.tv_nsec == second.st_ctim.tv_nsec;
 }
 } // namespace backup::core

@@ -73,6 +73,93 @@ function registerHandlers(): void {
             target_id: targetId,
         })
     })
+    ipcMain.handle('sources:choose', async (_event, kind: unknown) => {
+        if (kind !== 'files' && kind !== 'folders') {
+            throw new Error('来源类型无效')
+        }
+        const selection = await dialog.showOpenDialog(mainWindow!, {
+            properties: [
+                kind === 'files' ? 'openFile' : 'openDirectory',
+                'multiSelections',
+            ],
+            title:
+                kind === 'files'
+                    ? '选择需要备份的文件'
+                    : '选择需要备份的文件夹',
+        })
+        return selection.canceled ? null : selection.filePaths
+    })
+    const sourceArgs = (
+        paths: unknown,
+        targetId: unknown,
+        fileTypes: unknown,
+        preserveEmptyDirs: unknown,
+        name?: unknown,
+    ) => {
+        const supported = [
+            'file',
+            'symlink',
+            'fifo',
+            'character_device',
+            'block_device',
+            'socket',
+        ]
+        if (
+            !Array.isArray(paths) ||
+            paths.length < 1 ||
+            paths.length > 100 ||
+            paths.some(
+                (path) =>
+                    typeof path !== 'string' || !path || path.length > 4096,
+            ) ||
+            typeof targetId !== 'string' ||
+            !Array.isArray(fileTypes) ||
+            fileTypes.length < 1 ||
+            fileTypes.length > supported.length ||
+            fileTypes.some((type) => !supported.includes(type)) ||
+            new Set(fileTypes).size !== fileTypes.length ||
+            typeof preserveEmptyDirs !== 'boolean' ||
+            (name !== undefined && typeof name !== 'string')
+        ) {
+            throw new Error('请选择有效来源和至少一种可备份类型')
+        }
+        return {
+            sources: paths,
+            target_id: targetId,
+            file_types: fileTypes,
+            preserve_empty_dirs: preserveEmptyDirs,
+            ...(name !== undefined ? { name } : {}),
+        }
+    }
+    ipcMain.handle(
+        'sources:preview',
+        (
+            _event,
+            paths: unknown,
+            targetId: unknown,
+            fileTypes: unknown,
+            preserveEmptyDirs: unknown,
+        ) =>
+            bridge.send(
+                'preview_sources',
+                sourceArgs(paths, targetId, fileTypes, preserveEmptyDirs),
+            ),
+    )
+    ipcMain.handle(
+        'tasks:create',
+        (
+            _event,
+            paths: unknown,
+            targetId: unknown,
+            name: unknown,
+            fileTypes: unknown,
+            preserveEmptyDirs: unknown,
+        ) =>
+            bridge.send(
+                'add_task',
+                sourceArgs(paths, targetId, fileTypes, preserveEmptyDirs, name),
+            ),
+    )
     ipcMain.handle('tasks:remove', (_event, id: unknown) =>
         bridge.send('remove_task', { id }),
     )

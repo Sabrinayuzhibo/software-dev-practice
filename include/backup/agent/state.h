@@ -17,6 +17,7 @@ class State
     QJsonObject configure(const QString& action, const QJsonObject& args);
     QJsonObject task(const QString& id) const;
     QJsonObject target(const QString& id) const;
+    QJsonObject prepareTask(const QJsonObject& args) const;
     void rememberTargetRoot(const QString& id, const QString& root);
     QString directory() const;
     // Return summaries with optional scan grouping/filter and a next offset.

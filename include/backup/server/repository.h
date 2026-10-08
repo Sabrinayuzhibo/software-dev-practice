@@ -1,13 +1,16 @@
 #pragma once
 
 // Version storage: staged bytes become visible only at directory publication.
+#include "backup/core/manifest.h"
+#include "backup/core/source_scope.h"
+
 #include <QCryptographicHash>
 #include <QFile>
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QLockFile>
-#include <QSet>
 #include <memory>
+#include <optional>
 
 namespace backup::server
 {
@@ -42,8 +45,8 @@ class Repository
     QString stagingPath_;
     QJsonObject summary_;
     QJsonObject currentEntry_;
-    QSet<QString> paths_;
-    QSet<QString> directories_;
+    core::Manifest entries_;
+    std::optional<core::SourceScope> source_;
     QFile manifest_;
     QFile content_;
     QFile warnings_;
@@ -51,10 +54,6 @@ class Repository
     qint64 warningCount_ = 0;
     QCryptographicHash fileHash_{QCryptographicHash::Sha256};
     QCryptographicHash manifestHash_{QCryptographicHash::Sha256};
-    qint64 files_ = 0;
-    qint64 directoriesCount_ = 0;
-    qint64 bytes_ = 0;
-    qint64 entryCount_ = 0;
     std::unique_ptr<QLockFile> lock_;
 };
 } // namespace backup::server

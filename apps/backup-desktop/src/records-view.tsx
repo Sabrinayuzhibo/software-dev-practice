@@ -3,6 +3,8 @@ import { Fragment, useEffect, useRef, useState } from 'react'
 import type { Operation } from './types'
 import type { ConsoleModel } from './use-backup-console'
 import { actionLabels, formatBytes, formatTime, stateLabels } from './ui'
+import { sourceLabel } from './source-scope'
+import { FileTypeSummary } from './file-type-filter'
 
 function RecordCells({
     record,
@@ -18,9 +20,19 @@ function RecordCells({
             <td>{formatTime(record.started_at)}</td>
             <td>
                 {actionLabels[record.action]}
+                {record.source_name && <small>{record.source_name}</small>}
                 <small className="path">
-                    {record.destination || record.source}
+                    {record.destination ||
+                        (record.source &&
+                            sourceLabel(record.source, record.selection))}
                 </small>
+                {record.selection && (
+                    <small>选定 {record.selection.length} 项</small>
+                )}
+                <FileTypeSummary
+                    types={record.file_types}
+                    preserveEmptyDirs={record.preserve_empty_dirs}
+                />
                 {!!record.scan_count && (
                     <small className="scan-history-count">
                         <span>共 {record.scan_count} 次</span>

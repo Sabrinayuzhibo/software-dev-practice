@@ -119,6 +119,14 @@ export async function checkP0({
         join(tmpdir(), 'backup-operation-lost.png'),
         Buffer.from(capture.data, 'base64'),
     )
+    await until(
+        () =>
+            page.evaluate(
+                "!!document.querySelector('.operation-connection button')",
+            ),
+        'lost operation retry action',
+        10000,
+    )
     await main.evaluate('failStatus = false; reloadLostStatus = false')
     await click('.operation-connection button')
     await until(

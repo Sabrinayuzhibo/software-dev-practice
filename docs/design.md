@@ -15,26 +15,38 @@
 
 ### 1.0 当前基础实现（2026-10-08）
 
-当前实现覆盖 FR-01—06、FR-17 的 P0 本地行为，并接入 FR-07 的基础操作界面；真实掉电等验收边界见测试报告，导出保留到 P2。实现采用现有 Qt Core/Network、JSON 帧和 Electron 子进程结构，以下明确其与后续架构设计的区别：
+当前实现覆盖 FR-01—06、FR-17 的 P0 本地行为，以及 FR-10 特殊文件类型，并接入 FR-07 的基础操作界面；真实掉电等验收边界见测试报告，导出保留到 P2。实现采用现有 Qt Core/Network、JSON 帧和 Electron 子进程结构，以下明确其与后续架构设计的区别：
 
 | 部分 | 当前基础实现 |
 | --- | --- |
 | 配置与记录 | Agent 独占 `--state-dir`，`config.json` 保存任务/目标，`operations/<id>.json` 保存阶段、计数、结果及错误；QSaveFile 原子替换，旧 tasks.json 导入一次并保留。目标设置可在执行中保存，工作线程继续使用开始时的副本；可选 repository_path 校验本机 Server 的实际仓库，别名目标也不能重复添加同一来源 |
+| 来源选择 | `preview_sources` 校验绝对路径、合并重复/被包含项，返回来源类型及还原路径；`add_task` 的 sources 支持文件、文件夹和混合选择，可带 name。旧 path 接口保持整目录语义。最多 100 个显式来源、16 KiB 选择记录；Main 的文件与文件夹选择器均允许多选 |
+| 类型筛选 | 新建任务的 file_types 允许 file、symlink、fifo、character_device、block_device、socket，后三类默认不选；preserve_empty_dirs 独立控制空目录、默认 true。直接选择的非目录在路径合并前检查，文件夹始终递归遍历。扫描/上传共用遍历器；含新节点类型的任务配置格式 5 拒绝旧 Agent，Server 保存并回执规则，版本还原再次校验；格式 3、4 旧类型规则按原语义读取 |
 | 可用性 | ping 保留协议握手；认证后的 health 检查数据库、暂存和版本目录可列举，并写入、回读、fsync、删除临时文件。返回 storage_state / storage_error；目录读取失败不能返回空版本列表 |
 | 本地控制 | Main 通过 JSON Lines 发送白名单命令；`start_scan/start_backup/start_restore` 返回执行 ID，GUI 轮询记录；单个数据工作线程，事件线程仍可查询状态；关闭 GUI 终止 Agent |
 | 桌面交互（2026-10-07） | Main 串行发送请求直到收到响应，避免连接检查与数据请求争抢单个 Agent 工作线程；长操作返回执行 ID 后继续轮询。还原目录选择与发起还原分离，确认后才提交；版本按任务筛选。最小化时不暂停 Renderer 定时器，恢复时同步焦点并重绘 |
 | 服务接口 | 保留 `u32be length + JSON` 协议；文件块最多 256 KiB，以 Base64 放入内容消息，每块获得写入确认后再发下一块；清单和版本分页；本机令牌认证 |
-| 仓库格式 1 | `database/access.json` 存本地令牌；`storage/staging/<operation-id>/` 暂存；`storage/versions/<operation-id>/` 保存已提交版本；每版包含 summary.json、entries.jsonl、warnings.jsonl 和按条目编号命名的 .data 文件。新摘要保存 warning_count / warnings_sha256，查询仍兼容旧内嵌 warnings；需同时更新两端程序 |
+| 仓库格式 3，兼容读取 1、2 | `database/access.json` 存本地令牌；`storage/staging/<operation-id>/` 暂存；`storage/versions/<operation-id>/` 保存已提交版本；每版包含 summary.json、entries.jsonl、warnings.jsonl，只有普通文件内容条目生成按编号命名的 .data 文件。摘要保存 warning_count / warnings_sha256，查询仍兼容旧内嵌 warnings；历史版本不改写，两端程序需同时更新 |
 | 大量警告 | 备份分批上传警告后提交；版本列表省略明细，version_warnings 按需返回，每页最多 100 项、64 KiB 并校验整份 JSONL。Agent 执行记录的重复明细按 SHA-256 共享；版本文件内容仍独立保存 |
 | 扫描 | 文件、目录及跳过条目带类型预览，样本同时受数量和字节上限约束。单项读取失败继续检查其他条目，保存 error_count / complete 和具体路径；扫描不完整时记录 FAILED 并保留预览。备份保持失败即停止的语义 |
 | 提交 | 每个文件验证长度/SHA-256 并 fsync，清单计算整体摘要；摘要与清单写入后同步目录，暂存目录原子改名为版本目录并同步父目录；该改名是唯一可见点；重复 commit 查询同一版本 |
 | 故障恢复 | 未提交暂存从不参与查询/还原；保留用于诊断。Agent 重启将 RUNNING 记录标记 INTERRUPTED；提交阶段中断标为 WAITING，按同一执行 ID 查询。客户端连续 3 次查询失败时显示状态失联，停止自动轮询并保留操作锁；手动重试或窗口获得焦点时重新查询，不擅自终止 Agent 或认定备份失败 |
 | 还原 | 先验证分页清单和源/仓库重叠保护，再以目录 fd、openat/O_NOFOLLOW、mkdirat 创建条目；单个文件验证后以 linkat 无覆盖发布。`restores/<id>.jsonl` 在写入前同步 pending，完成持久化后同步 written；失败后分页返回已写入及待核对项，包含中断临时文件位置；重启保留该记录，撕裂的最后一行明确标记不完整 |
-| 资源与类型 | 有界文件块和网络缓冲；普通文件/目录完整处理，特殊条目警告跳过；每版独立保存内容；内存中的路径集合随条目数增长，未承诺百万条目规模 |
+| 资源与类型 | 有界文件块和网络缓冲；普通文件、目录、软链接、硬链接、FIFO 完整处理；字符设备、块设备及 socket 默认警告跳过，显式选择后仅保存节点信息。每版独立保存内容，组内硬链接仅保存一份；路径、类型状态集合随条目数增长，未承诺百万条目规模 |
 
-当前尚未采用下文的 SQLite、对象去重、二进制 DATA 帧、Unix socket 常驻 Agent、远端 TLS、监控、压缩或加密。源文件可读性/类型、读取前后 stat 信息和目录变化会检查，但不提供文件系统原子快照。仓库格式升级需单独迁移，不应把格式 1 数据直接当作未来对象仓库。
+格式 2 起普通文件可带 `link_group`，值为组内第一个路径；后续 `hardlink` 条目以 `link_to` 引用该路径并保留大小和 SHA-256。分组键是设备号和 inode，不按内容相同合并不同 inode。`symlink` 的 `target_base64` 保存原始目标字节，预览转换为文本；`fifo` 仅保存路径、类型。格式 3 起显式入选的字符/块设备保存 `device_major`、`device_minor`，socket 只保存路径和类型，均无内容对象。`files` / `bytes` 按普通文件路径累计（含硬链接成员），`stored_bytes` 只累计保存的内容，另有各特殊类型独立计数。
 
-基础代码分工：`src/core/io.cpp` 提供受检 I/O；`src/agent/state.cpp` 管配置和记录；`channel.cpp` 管工作线程的有界 RPC；`operations.cpp` 管遍历/上传/还原；`src/server/repository.cpp` 管暂存和版本；Main/Preload 只开放固定入口。C++ 的 `.clang-format` 与项目 skill 约束新代码。
+来源由 `SourceScope` 表示：path 是逻辑根，缺少 selection 时仍为原有整目录任务；存在 selection 时保存相对路径和固定的 file/directory/symlink/fifo/character_device/block_device/socket 类型。新任务使用非空 file_types 及布尔 preserve_empty_dirs；旧任务没有后者时按原有 directory 类型规则解释，避免重写历史。单文件的根是其父目录，多项来源的根是共同父目录；只遍历所选根，必要的中间目录仅记录结构，不枚举同级项。选中叶条目先校验类型，再合并被文件夹覆盖的路径；文件夹无论空目录设置如何始终递归遍历，关闭保留时只写入包含匹配内容的父目录。完整目录检查内容变化，结构父目录只检查设备号/inode，防止未选同级项变化导致误判；选中叶链接保留自身文本，不解析其目标。来源与仓库/还原目录的包含检查按实际选中根进行。
+
+首次创建带 selection 的任务时配置原子升级为格式 2，使旧 Agent 拒绝配置，避免把共同父目录当作整目录备份。旧任务和历史版本保持原值。备份 begin 写入 selection/source_name，Server 回执必须返回同一选择范围；否则新 Agent 明确要求更新 Server，停止上传。Server 拒绝范围外条目及缺少明确选择项的提交；Agent 还原前也核对范围。执行摘要和版本保留选择快照，删除任务后仍可显示来源及还原路径。该选择不是尚未实现的 FR-11 筛选规则。
+
+旧的 file_types 任务使用配置格式 3 并保持原语义；首次创建带 preserve_empty_dirs 的新任务时配置升级为格式 4，含设备或 socket 类型时升级为格式 5。任务启动时快照规则，Agent 的扫描和上传共用 `sourceTree`；Server 回执两项规则，拒绝被排除的非目录条目，并在版本摘要记录规则。关闭空目录保留时，Server 发布与 Agent 还原前均检查清单中的每个目录有入选的非目录后代；没有匹配条目时可以发布空版本。未选的设备/socket 节点仍列出跳过警告。还原读取历史版本时重新校验保存的来源及规则。类型筛选不包含 FR-11 的路径模式、大小、时间、属主或权限条件。
+
+Server 发布前与 Agent 还原前共用清单校验器，拒绝非目录父路径、前向/循环/组外硬链接、内容摘要不一致及非法链接/设备字段。还原按清单顺序通过 `symlinkat`、`mkfifoat`、`mknodat` 和目录 fd 创建；socket 用临时路径绑定后无覆盖发布。软链接文本可含绝对路径或 `..`，但其后不能出现子条目。硬链接只引用本次还原已验证的普通文件，校验 inode 状态后从已固定的 fd 创建，结束前再次检查组员；目标不支持或跨设备时失败。Linux `/proc/self/fd` 用于已打开文件的无覆盖发布、socket 临时路径和固定目录遍历，需要挂载 procfs。
+
+当前尚未采用下文的 SQLite、跨版本对象去重、二进制 DATA 帧、Unix socket 常驻 Agent、远端 TLS、监控、压缩或加密。源文件可读性/类型、读取前后 stat 信息和目录变化会检查，但不提供文件系统原子快照。新程序直接读取格式 1、2 和 3；未来对象仓库迁移仍需单独设计，不能将现有格式直接当作该设计的数据。
+
+基础代码分工：`src/core/io.cpp` 提供受检 I/O，`manifest.cpp` 校验清单，`source_scope.cpp` 定义保存的选择范围；`src/agent/source_selection.cpp` 校验及规范化用户选择，`state.cpp` 管配置和记录；`channel.cpp` 管工作线程的有界 RPC；`source_tree.cpp` 统一扫描与上传遍历，`operations.cpp` 编排扫描/备份，`restore.cpp` 校验并还原；`src/server/repository.cpp` 管暂存和版本；Main/Preload 只开放固定入口。C++ 的 `.clang-format` 与项目 skill 约束新代码。
 
 ### 1.1 依据与设计约束
 
@@ -243,7 +255,7 @@ Operation 状态为 QUEUED、RUNNING、WAITING（连接/认证/解锁/提交结�
 
 ## 5. 类型、元数据和六类筛选
 
-lstat/readlink 识别链接与类型；硬链接组按 (st_dev, st_ino)，只包含选中路径，代表路径在筛选后选定。一组数据只存一次，不创建源范围外其他引用。FIFO 保存类型不读流；设备/socket 跳过警告；目标无法表达类型则失败，不静默转普通文件。
+lstat/readlink 识别链接与类型；硬链接组按 (st_dev, st_ino)，只包含选中路径，代表路径在筛选后选定。一组数据只存一次，不创建源范围外其他引用。FIFO 保存类型不读流；设备/socket 默认跳过警告，显式选择后仅保存节点元数据；目标无法表达类型则失败，不静默转普通文件。
 
 FilterEvaluator 供扫描、手动和实时共享：
 

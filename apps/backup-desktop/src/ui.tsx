@@ -34,6 +34,41 @@ export const stageLabels: Record<string, string> = {
     confirm: '确认结果',
 }
 
+export const entryTypeLabels: Record<string, string> = {
+    file: '文件',
+    directory: '目录',
+    symlink: '软链接',
+    hardlink: '硬链接',
+    fifo: '命名管道',
+    character_device: '字符设备',
+    block_device: '块设备',
+    socket: '套接字',
+    special: '特殊条目',
+    unknown: '未知类型',
+}
+
+export function specialEntryCounts(value: {
+    symlinks?: number | string
+    hardlinks?: number | string
+    fifos?: number | string
+    character_devices?: number | string
+    block_devices?: number | string
+    sockets?: number | string
+}): string {
+    return [
+        Number(value.symlinks) ? `${value.symlinks} 个软链接` : '',
+        Number(value.hardlinks) ? `${value.hardlinks} 个硬链接` : '',
+        Number(value.fifos) ? `${value.fifos} 个命名管道` : '',
+        Number(value.character_devices)
+            ? `${value.character_devices} 个字符设备`
+            : '',
+        Number(value.block_devices) ? `${value.block_devices} 个块设备` : '',
+        Number(value.sockets) ? `${value.sockets} 个套接字` : '',
+    ]
+        .filter(Boolean)
+        .join(' · ')
+}
+
 export function formatBytes(value: number | string): string {
     const bytes = Number(value)
     if (bytes < 1024) {
@@ -158,6 +193,20 @@ export function ScanPreview({
                     </strong>
                 </span>
             </div>
+            {specialEntryCounts(result) && (
+                <p className="muted special-counts">
+                    {specialEntryCounts(result)}
+                </p>
+            )}
+            {result.complete &&
+                result.files === 0 &&
+                !result.symlinks &&
+                !result.fifos &&
+                !result.character_devices &&
+                !result.block_devices &&
+                !result.sockets && (
+                    <p className="muted scan-empty">本次没有匹配文件</p>
+                )}
             {!!result.warning_count && (
                 <WarningDetails
                     key={operationId}
@@ -185,18 +234,32 @@ export function ScanPreview({
                                         key={file.path}
                                         data-type={file.type || 'file'}
                                     >
-                                        <td>{file.path}</td>
                                         <td>
-                                            {
-                                                (
-                                                    {
-                                                        file: '文件',
-                                                        directory: '目录',
-                                                        symlink: '软链接',
-                                                        special: '特殊条目',
-                                                    } as Record<string, string>
-                                                )[file.type || 'file']
-                                            }
+                                            {file.path}
+                                            {file.link_target !== undefined && (
+                                                <small>
+                                                    指向：{file.link_target}
+                                                </small>
+                                            )}
+                                            {file.link_to && (
+                                                <small>
+                                                    同组文件：{file.link_to}
+                                                </small>
+                                            )}
+                                            {file.device_major !== undefined &&
+                                                file.device_minor !==
+                                                    undefined && (
+                                                    <small>
+                                                        设备号：
+                                                        {file.device_major}:
+                                                        {file.device_minor}
+                                                    </small>
+                                                )}
+                                        </td>
+                                        <td>
+                                            {entryTypeLabels[
+                                                file.type || 'file'
+                                            ] || '未知类型'}
                                         </td>
                                         <td>
                                             {file.size === undefined

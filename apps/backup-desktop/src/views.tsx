@@ -3,15 +3,19 @@ import {
     ArrowDownToLine,
     Database,
     Folder,
-    FolderPlus,
+    Plus,
     RefreshCw,
     Settings,
 } from 'lucide-react'
+import { useState } from 'react'
 
-import { formatBytes, formatTime } from './ui'
+import { formatBytes, formatTime, specialEntryCounts } from './ui'
 import type { ConsoleModel } from './use-backup-console'
 import { TaskCard } from './task-card'
 import { WarningDetails } from './warning-details'
+import { CreateTaskDialog } from './create-task-dialog'
+import { SourceDetails, sourceLabel, taskTitle } from './source-scope'
+import { FileTypeSummary } from './file-type-filter'
 
 export function TargetsView({ model }: { model: ConsoleModel }) {
     const { config, targetDraft, setTargetDraft, mutating, saveTarget } = model
@@ -159,19 +163,19 @@ export function VersionsView({ model }: { model: ConsoleModel }) {
         <section>
             <div className="section-heading">
                 <label className="version-filter">
-                    目录
+                    任务
                     <select
-                        aria-label="筛选备份目录"
+                        aria-label="筛选备份任务"
                         value={versionTaskId}
                         disabled={versionsLoading}
                         onChange={(event) =>
                             setVersionTaskId(event.target.value)
                         }
                     >
-                        <option value="">全部目录（含已移除任务）</option>
+                        <option value="">全部任务（含已移除任务）</option>
                         {tasks.map((task) => (
                             <option key={task.id} value={task.id}>
-                                {task.path}
+                                {taskTitle(task)}
                             </option>
                         ))}
                     </select>
@@ -211,7 +215,7 @@ export function VersionsView({ model }: { model: ConsoleModel }) {
                         <p>暂无备份版本</p>
                         <button onClick={() => model.navigate('tasks')}>
                             <Folder size={16} />
-                            前往目录任务
+                            前往备份任务
                         </button>
                     </div>
                 )}
@@ -220,7 +224,7 @@ export function VersionsView({ model }: { model: ConsoleModel }) {
                     <thead>
                         <tr>
                             <th>完成时间 / 版本</th>
-                            <th>源目录</th>
+                            <th>备份来源</th>
                             <th>内容</th>
                             <th>操作</th>
                         </tr>
@@ -235,7 +239,19 @@ export function VersionsView({ model }: { model: ConsoleModel }) {
                                     </small>
                                 </td>
                                 <td className="path">
-                                    {version.source}
+                                    {version.source_name && (
+                                        <strong>{version.source_name}</strong>
+                                    )}
+                                    <div>
+                                        {sourceLabel(
+                                            version.source,
+                                            version.selection,
+                                        )}
+                                    </div>
+                                    <SourceDetails
+                                        root={version.source}
+                                        selection={version.selection}
+                                    />
                                     {!!version.warning_count && (
                                         <WarningDetails
                                             key={`${model.targetId}:${version.id}`}
@@ -256,7 +272,31 @@ export function VersionsView({ model }: { model: ConsoleModel }) {
                                         {version.directories} 个目录 ·{' '}
                                         {formatBytes(version.bytes)}
                                     </small>
-                                    <small>范围：完整目录</small>
+                                    <small>
+                                        {version.selection
+                                            ? `范围：选定 ${version.selection.length} 项`
+                                            : '范围：完整目录'}
+                                    </small>
+                                    <FileTypeSummary
+                                        types={version.file_types}
+                                        preserveEmptyDirs={
+                                            version.preserve_empty_dirs
+                                        }
+                                    />
+                                    {specialEntryCounts(version) && (
+                                        <small>
+                                            {specialEntryCounts(version)}
+                                        </small>
+                                    )}
+                                    {Number(version.hardlinks) > 0 &&
+                                        version.stored_bytes !== undefined && (
+                                            <small>
+                                                内容存储：
+                                                {formatBytes(
+                                                    version.stored_bytes,
+                                                )}
+                                            </small>
+                                        )}
                                 </td>
                                 <td>
                                     <button
@@ -285,24 +325,25 @@ export function VersionsView({ model }: { model: ConsoleModel }) {
 }
 
 export function TasksView({ model }: { model: ConsoleModel }) {
-    const { tasks, busy, addFolder } = model
+    const { tasks, busy } = model
+    const [creating, setCreating] = useState(false)
     return (
         <section>
             <div className="section-heading">
-                <span className="muted">{tasks.length} 个目录</span>
+                <span className="muted">{tasks.length} 个任务</span>
                 <button
                     className="primary-button"
                     disabled={busy}
-                    onClick={() => void addFolder()}
+                    onClick={() => setCreating(true)}
                 >
-                    <FolderPlus size={17} />
-                    添加目录
+                    <Plus size={17} />
+                    新建任务
                 </button>
             </div>
             {tasks.length === 0 && (
                 <div className="empty-state">
                     <Folder size={32} />
-                    <p>当前目标下暂无备份目录</p>
+                    <p>当前目标下暂无备份任务</p>
                 </div>
             )}
             <div className="task-list">
@@ -310,6 +351,12 @@ export function TasksView({ model }: { model: ConsoleModel }) {
                     <TaskCard key={task.id} task={task} model={model} />
                 ))}
             </div>
+            {creating && (
+                <CreateTaskDialog
+                    model={model}
+                    onClose={() => setCreating(false)}
+                />
+            )}
         </section>
     )
 }

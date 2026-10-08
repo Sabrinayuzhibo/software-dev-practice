@@ -18,6 +18,7 @@
 #include "backup/agent/restore_journal.h"
 #include "backup/agent/state.h"
 #include "backup/core/io.h"
+#include "backup/core/source_scope.h"
 
 namespace
 {
@@ -128,6 +129,10 @@ class CommandReader final : public QObject
             {
                 reply(id, true, state_.operationWarnings(args));
             }
+            else if (action == "preview_sources")
+            {
+                reply(id, true, state_.prepareTask(args));
+            }
             else if (action == "restore_entries")
             {
                 const auto record = state_.operation(text(args, "id"));
@@ -220,6 +225,31 @@ class CommandReader final : public QObject
         {
             task = state_.task(text(args, "task_id"));
             args.insert("path", task.value("path"));
+            if (task.contains("selection"))
+            {
+                args.insert("selection", task.value("selection"));
+            }
+            else
+            {
+                args.remove("selection");
+            }
+            if (task.contains("file_types"))
+            {
+                args.insert("file_types", task.value("file_types"));
+            }
+            else
+            {
+                args.remove("file_types");
+            }
+            if (task.contains("preserve_empty_dirs"))
+            {
+                args.insert("preserve_empty_dirs",
+                            task.value("preserve_empty_dirs"));
+            }
+            else
+            {
+                args.remove("preserve_empty_dirs");
+            }
             args.insert("target_id", task.value("target_id"));
         }
         auto target = args.contains("target_id")
@@ -247,6 +277,23 @@ class CommandReader final : public QObject
                            {"source", args.value("path")},
                            {"destination", args.value("destination")},
                            {"version_id", args.value("version_id")}};
+        if (args.contains("selection"))
+        {
+            record.insert("selection", args.value("selection"));
+        }
+        if (args.contains("file_types"))
+        {
+            record.insert("file_types", args.value("file_types"));
+        }
+        if (args.contains("preserve_empty_dirs"))
+        {
+            record.insert("preserve_empty_dirs",
+                          args.value("preserve_empty_dirs"));
+        }
+        if (task.contains("name"))
+        {
+            record.insert("source_name", task.value("name"));
+        }
         args.insert("operation_id", record.value("id"));
         if (recorded)
         {
@@ -283,15 +330,19 @@ class CommandReader final : public QObject
                 {
                     if (action == "scan")
                     {
-                        const auto source = canonicalPath(text(args, "path"));
-                        require(!overlaps(source, stateDirectory),
+                        auto source = args;
+                        if (task.isEmpty())
+                        {
+                            source.insert("path",
+                                          canonicalPath(text(args, "path")));
+                        }
+                        require(!SourceScope(source).overlaps(stateDirectory),
                                 "Source overlaps Agent state");
                         result = backup::agent::scan(source, progress);
                     }
                     else if (action == "backup")
                     {
-                        require(!overlaps(canonicalPath(text(task, "path")),
-                                          stateDirectory),
+                        require(!SourceScope(task).overlaps(stateDirectory),
                                 "Source overlaps Agent state");
                         result = backup::agent::backup(
                             task, target, text(record, "id"), progress);
@@ -319,7 +370,8 @@ class CommandReader final : public QObject
                     }
                     for (const auto* key :
                          {"files", "bytes", "directories", "warnings",
-                          "error_count", "complete"})
+                          "error_count", "complete", "symlinks", "hardlinks",
+                          "fifos", "stored_bytes", "entries"})
                     {
                         if (result.contains(QLatin1String(key)))
                         {

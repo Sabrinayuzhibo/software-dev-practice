@@ -11,6 +11,7 @@ import threading
 
 from backup_faults import Proxy
 from backup_integration import Fixture, stop, tree
+from file_type_fixtures import create_socket
 
 
 def pages(fixture, action, args, field):
@@ -91,7 +92,7 @@ def check_large_versions(fixture, root):
         nested /= str(index) + "x" * 180
         nested.mkdir()
     for index in range(1899):
-        (nested / f"link-{index:04}").symlink_to("missing")
+        create_socket(nested / f"link-{index:04}")
     task = fixture.request("add_task", {"path": str(source), "target_id": "local"})
     ids = []
     refs = set()

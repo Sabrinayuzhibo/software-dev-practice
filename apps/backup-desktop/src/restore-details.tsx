@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { RefreshCw } from 'lucide-react'
 import type { RestorePage } from './types'
+import { entryTypeLabels } from './ui'
 
 export function RestoreDetails({ operationId }: { operationId: string }) {
     const [entries, setEntries] = useState<RestorePage['entries']>([])
@@ -68,7 +69,7 @@ export function RestoreDetails({ operationId }: { operationId: string }) {
                 {entries.map((entry) => (
                     <p className="path" key={entry.path}>
                         {entry.path} ·{' '}
-                        {entry.type === 'directory' ? '目录' : '文件'} ·{' '}
+                        {entryTypeLabels[entry.type] || '未知类型'} ·{' '}
                         {entry.state === 'written' ? '已写入' : '结果待核对'}
                         {entry.temporary_path && (
                             <small>

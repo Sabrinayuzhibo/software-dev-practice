@@ -9,7 +9,8 @@ qt_network = dependency('qt6', modules: ['Network'], method: 'pkg-config')
 inc = include_directories('include')
 
 protocol = static_library('backup-protocol',
-  ['src/protocol/frame.cpp', 'src/core/io.cpp', 'src/core/detail_page.cpp'],
+  ['src/protocol/frame.cpp', 'src/core/io.cpp', 'src/core/detail_page.cpp',
+   'src/core/manifest.cpp', 'src/core/source_scope.cpp'],
   include_directories: inc,
   dependencies: qt_core)
 protocol_dep = declare_dependency(
@@ -24,7 +25,8 @@ agent_moc = qt6.compile_moc(
 agent_core = static_library('backup-agent-core',
   ['src/agent/agent_client.cpp', 'src/agent/channel.cpp',
    'src/agent/state.cpp', 'src/agent/history.cpp', 'src/agent/restore_journal.cpp',
-   'src/agent/operations.cpp', agent_moc],
+   'src/agent/operations.cpp', 'src/agent/source_tree.cpp', 'src/agent/source_selection.cpp',
+   'src/agent/restore.cpp', agent_moc],
   include_directories: inc,
   dependencies: [protocol_dep, qt_network])
 agent_dep = declare_dependency(
@@ -89,4 +91,20 @@ test('backup-p0-boundaries', python3,
   timeout: 120)
 test('backup-disk-full', python3,
   args: [files('tests/backup_disk_full.py')[0], agent.full_path(), server.full_path()],
+  timeout: 120)
+restore_faults = shared_library('restore-syscall-faults',
+  'tests/restore_syscall_faults.cpp',
+  dependencies: meson.get_compiler('cpp').find_library('dl'))
+test('backup-file-types', python3,
+  args: [files('tests/backup_file_types.py')[0], agent.full_path(), server.full_path(),
+         restore_faults.full_path()],
+  timeout: 120)
+test('backup-file-type-mounts', python3,
+  args: [files('tests/backup_file_type_mounts.py')[0], agent.full_path(), server.full_path()],
+  timeout: 120)
+test('backup-sources', python3,
+  args: [files('tests/backup_sources.py')[0], agent.full_path(), server.full_path()],
+  timeout: 120)
+test('backup-type-filter', python3,
+  args: [files('tests/backup_type_filter.py')[0], agent.full_path(), server.full_path()],
   timeout: 120)

@@ -1,6 +1,7 @@
 #include "backup/agent/restore_journal.h"
 #include "backup/core/detail_page.h"
 #include "backup/core/io.h"
+#include "backup/core/manifest.h"
 
 #include <QHash>
 #include <QStringList>
@@ -63,9 +64,7 @@ QJsonObject restoreEntries(const QString& directory, const QJsonObject& args)
         require(line.endsWith('\n'), "Invalid restore journal entry");
         const auto item = parseObject(line);
         const auto path = text(item, "path");
-        require(validPath(path) &&
-                    (item.value("type") == "file" ||
-                     item.value("type") == "directory") &&
+        require(validPath(path) && supportedEntryType(text(item, "type")) &&
                     (!item.contains("temporary_path") ||
                      validPath(text(item, "temporary_path"))) &&
                     (item.value("state") == "pending" ||

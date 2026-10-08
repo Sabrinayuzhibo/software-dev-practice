@@ -3,6 +3,36 @@ export interface BackupTask {
     path: string
     target_id: string
     createdAt: string
+    name?: string
+    selection?: SourceEntry[]
+    file_types?: FileType[]
+    preserve_empty_dirs?: boolean
+}
+
+export type FileType =
+    | 'file'
+    | 'directory'
+    | 'symlink'
+    | 'fifo'
+    | 'character_device'
+    | 'block_device'
+    | 'socket'
+export type ContentFileType = Exclude<FileType, 'directory'>
+
+export interface SourceEntry {
+    path: string
+    type: FileType
+}
+
+export interface SourcePlan {
+    scope: {
+        path: string
+        selection?: SourceEntry[]
+        file_types?: FileType[]
+        preserve_empty_dirs?: boolean
+    }
+    items: (SourceEntry & { restore_path: string })[]
+    merged_count: number
 }
 
 export interface Target {
@@ -23,6 +53,7 @@ export interface Configuration {
 export interface Warning {
     path: string
     reason: string
+    type?: string
     severity?: 'error'
 }
 
@@ -31,20 +62,47 @@ export interface ScanResult {
     files: number
     directories: number
     bytes: number
+    stored_bytes?: number
+    symlinks?: number
+    hardlinks?: number
+    fifos?: number
+    character_devices?: number
+    block_devices?: number
+    sockets?: number
     complete: boolean
     warning_count: number
     error_count?: number
-    sample: { path: string; type?: string; size?: number; sha256?: string }[]
+    sample: {
+        path: string
+        type?: string
+        size?: number
+        sha256?: string
+        link_target?: string
+        link_to?: string
+        device_major?: string
+        device_minor?: string
+    }[]
 }
 
 export interface Version {
     id: string
     task_id: string
     source: string
+    source_name?: string
+    selection?: SourceEntry[]
+    file_types?: FileType[]
+    preserve_empty_dirs?: boolean
     completed_at: string
     files: string
     directories: string
     bytes: string
+    stored_bytes?: string
+    symlinks?: string
+    hardlinks?: string
+    fifos?: string
+    character_devices?: string
+    block_devices?: string
+    sockets?: string
     warning_count: number
     rules: Record<string, unknown>
 }
@@ -58,11 +116,21 @@ export interface Operation {
     started_at: string
     finished_at?: string
     source?: string
+    source_name?: string
+    selection?: SourceEntry[]
+    file_types?: FileType[]
+    preserve_empty_dirs?: boolean
     destination?: string
     target: Target
     path?: string
     files: number
     directories?: number
+    symlinks?: number
+    hardlinks?: number
+    fifos?: number
+    character_devices?: number
+    block_devices?: number
+    sockets?: number
     bytes: number
     error?: string
     warning_count: number
@@ -115,6 +183,20 @@ export interface DesktopApi {
     }>
     listTasks(): Promise<BackupTask[]>
     addFolder(targetId?: string): Promise<BackupTask | null>
+    chooseSources(kind: 'files' | 'folders'): Promise<string[] | null>
+    previewSources(
+        paths: string[],
+        targetId: string,
+        fileTypes: ContentFileType[],
+        preserveEmptyDirs: boolean,
+    ): Promise<SourcePlan>
+    createTask(
+        paths: string[],
+        targetId: string,
+        name: string,
+        fileTypes: ContentFileType[],
+        preserveEmptyDirs: boolean,
+    ): Promise<BackupTask>
     removeTask(id: string): Promise<void>
     scanTask(id: string): Promise<{ operation_id: string }>
     backupTask(id: string): Promise<{ operation_id: string }>

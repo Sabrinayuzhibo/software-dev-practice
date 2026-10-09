@@ -95,6 +95,9 @@ State::State(const QString& directory) : directory_(canonicalPath(directory))
                      !scope.fileTypes().contains("socket")) ||
                         config_.value("format").toInt() >= 5,
                     "Device and socket filters require configuration format 5");
+            require(!scope.hasFilters() ||
+                        config_.value("format").toInt() >= 6,
+                    "Custom filters require configuration format 6");
             require(!item.contains("name") ||
                         (item.value("name").isString() &&
                          item.value("name").toString().size() <= 120),
@@ -183,10 +186,16 @@ void State::save(const QJsonObject& next)
 QJsonObject State::prepareTask(const QJsonObject& args) const
 {
     require(args.value("sources").isArray(), "Invalid source list");
-    const auto plan = prepareSources(args.value("sources").toArray(),
-                                     args.value("file_types"),
-                                     args.value("preserve_empty_dirs"));
-    const SourceScope scope(plan.value("scope").toObject());
+    auto plan = prepareSources(args.value("sources").toArray(),
+                               args.value("file_types"),
+                               args.value("preserve_empty_dirs"));
+    auto scopeValue = plan.value("scope").toObject();
+    if (args.contains("filters"))
+    {
+        scopeValue.insert("filters", args.value("filters"));
+    }
+    const SourceScope scope(scopeValue);
+    plan.insert("scope", scope.json());
     target(text(args, "target_id"));
     require(!scope.overlaps(directory_), "Source overlaps Agent state");
     for (const auto& value : config_.value("targets").toArray())
@@ -266,6 +275,10 @@ QJsonObject State::addTask(const QJsonObject& args)
              next.value("format").toInt() < 2)
     {
         next.insert("format", 2);
+    }
+    if (scope.hasFilters() && next.value("format").toInt() < 6)
+    {
+        next.insert("format", 6);
     }
     save(next);
     return created;

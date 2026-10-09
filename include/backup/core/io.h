@@ -25,6 +25,7 @@ QString newId();
 QString now();
 QString text(const QJsonObject& object, const char* field);
 qint64 number(const QJsonObject& object, const char* field);
+qint64 signedNumber(const QJsonObject& object, const char* field);
 bool validId(const QString& value);
 bool validPath(const QString& value);
 QString canonicalPath(const QString& path);

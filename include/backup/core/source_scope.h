@@ -22,6 +22,13 @@ class SourceScope
     bool hasEmptyDirectoryRule() const;
     bool preservesEmptyDirectories() const;
     bool includes(const QString& type) const;
+    bool hasFilters() const;
+    bool matches(const QString& path, const QString& type, qint64 size,
+                 qint64 uid, qint64 mtimeSeconds) const;
+    bool excludesDirectorySubtree(const QString& path, qint64 uid,
+                                  qint64 mtimeSeconds) const;
+    bool allows(const QJsonObject& entry) const;
+    const QJsonObject& filters() const;
     QStringList paths() const;
     QJsonObject json(const char* field = "path") const;
     bool allows(const QString& path, const QString& type) const;
@@ -34,5 +41,6 @@ class SourceScope
     QJsonArray fileTypes_;
     bool hasEmptyDirectoryRule_ = false;
     bool preserveEmptyDirectories_ = true;
+    QJsonObject filters_;
 };
 } // namespace backup::core

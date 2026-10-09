@@ -11,6 +11,7 @@
 #include <dirent.h>
 #include <fcntl.h>
 #include <memory>
+#include <limits>
 #include <unistd.h>
 
 namespace backup::core
@@ -64,6 +65,31 @@ qint64 number(const QJsonObject& object, const char* field)
         }
     }
     require(ok && result >= 0, QStringLiteral("Invalid number: %1").arg(field));
+    return result;
+}
+
+qint64 signedNumber(const QJsonObject& object, const char* field)
+{
+    const auto value = object.value(QLatin1String(field));
+    bool ok = false;
+    qint64 result = 0;
+    if (value.isString())
+    {
+        result = value.toString().toLongLong(&ok);
+    }
+    else if (value.isDouble())
+    {
+        const double input = value.toDouble();
+        ok = std::isfinite(input) &&
+             input >= static_cast<double>(std::numeric_limits<qint64>::min()) &&
+             input < static_cast<double>(std::numeric_limits<qint64>::max()) &&
+             std::floor(input) == input;
+        if (ok)
+        {
+            result = static_cast<qint64>(input);
+        }
+    }
+    require(ok, QStringLiteral("Invalid number: %1").arg(field));
     return result;
 }
 

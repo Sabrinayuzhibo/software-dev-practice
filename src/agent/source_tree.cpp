@@ -75,6 +75,15 @@ bool sameDirectory(const struct stat& before, const struct stat& after)
            before.st_ino == after.st_ino;
 }
 
+void addMetadata(QJsonObject& entry, const struct stat& info)
+{
+    entry.insert("mode", static_cast<qint64>(info.st_mode & 0777));
+    entry.insert("uid", QString::number(info.st_uid));
+    entry.insert("gid", QString::number(info.st_gid));
+    entry.insert("mtime_sec", QString::number(info.st_mtim.tv_sec));
+    entry.insert("mtime_nsec", QString::number(info.st_mtim.tv_nsec));
+}
+
 class SourceEntries
 {
   public:
@@ -112,6 +121,7 @@ QJsonObject SourceEntries::regular(const QString& path, const struct stat& info,
     QJsonObject entry{{"path", path},
                       {"type", "file"},
                       {"size", QString::number(before.st_size)}};
+    addMetadata(entry, before);
     if (group != groups_.end())
     {
         const auto anchorPath = text(group->second, "path");
@@ -196,6 +206,10 @@ QJsonObject SourceEntries::process(const QString& path, const struct stat& info,
         return regular(path, info, status);
     }
     QJsonObject entry{{"path", path}, {"type", type}};
+    if (type == "directory" || type == "symlink" || type == "fifo")
+    {
+        addMetadata(entry, info);
+    }
     if (type == "symlink")
     {
         // O_PATH and empty-path readlinkat pin the link itself, even if its
@@ -378,8 +392,18 @@ QJsonObject sourceTree(const QJsonObject& source, Channel* channel,
             require(expected.isEmpty() || type == expected,
                     "Selected source type changed: " + path);
             status.insert("path", path);
+            if (type == "directory" &&
+                scope.excludesDirectorySubtree(path, info.st_uid,
+                                               info.st_mtim.tv_sec))
+            {
+                processed.insert(path);
+                progress(status);
+                return;
+            }
             if (type == "directory" && !structural &&
-                !scope.includes("directory"))
+                (!scope.includes("directory") ||
+                 !scope.matches(path, type, 0, info.st_uid,
+                                info.st_mtim.tv_sec)))
             {
                 deferredDirectories.insert(path, info);
                 processed.insert(path);
@@ -409,6 +433,19 @@ QJsonObject sourceTree(const QJsonObject& source, Channel* channel,
             {
                 processed.insert(path);
                 return;
+            }
+            if (type != "directory")
+            {
+                const auto filterType =
+                    type == "file" && info.st_nlink > 1 ? "hardlink" : type;
+                if (!scope.matches(path, filterType,
+                                   type == "file" ? info.st_size : 0,
+                                   info.st_uid, info.st_mtim.tv_sec))
+                {
+                    processed.insert(path);
+                    progress(status);
+                    return;
+                }
             }
             if (supportedEntryType(type))
             {

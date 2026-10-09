@@ -6,7 +6,7 @@
 
 namespace backup::core
 {
-inline constexpr int kVersionFormat = 3;
+inline constexpr int kVersionFormat = 4;
 inline constexpr qsizetype kLinkTargetBytes = 4096;
 
 bool supportedEntryType(const QString& type);

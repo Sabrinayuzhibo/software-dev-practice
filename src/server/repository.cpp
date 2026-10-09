@@ -261,6 +261,13 @@ QJsonObject Repository::begin(const QJsonObject& request)
                      source.preservesEmptyDirectories());
         summary_.insert("rules", rules);
     }
+    if (source.hasFilters())
+    {
+        summary_.insert("filters", source.filters());
+        auto rules = summary_.value("rules").toObject();
+        rules.insert("filters", source.filters());
+        summary_.insert("rules", rules);
+    }
     if (!source.selection().isEmpty())
     {
         summary_.insert("selection", source.selection());
@@ -269,6 +276,20 @@ QJsonObject Repository::begin(const QJsonObject& request)
     {
         const auto name = text(request, "source_name");
         summary_.insert("source_name", name);
+    }
+    if (request.contains("root_metadata"))
+    {
+        const auto metadata = request.value("root_metadata").toObject();
+        const auto mode = number(metadata, "mode");
+        const auto uid = number(metadata, "uid");
+        const auto gid = number(metadata, "gid");
+        const auto nanoseconds = number(metadata, "mtime_nsec");
+        signedNumber(metadata, "mtime_sec");
+        require(mode <= 0777 && uid <= std::numeric_limits<uid_t>::max() &&
+                    gid <= std::numeric_limits<gid_t>::max() &&
+                    nanoseconds < 1000000000,
+                "Invalid source root metadata");
+        summary_.insert("root_metadata", metadata);
     }
     entries_ = {};
     source_ = source;
@@ -306,6 +327,10 @@ QJsonObject Repository::begin(const QJsonObject& request)
         receipt.insert("preserve_empty_dirs",
                        source.preservesEmptyDirectories());
     }
+    if (source.hasFilters())
+    {
+        receipt.insert("filters", source.filters());
+    }
     return receipt;
 }
 
@@ -325,13 +350,12 @@ void Repository::addEntry(const QJsonObject& entry)
     entries_.checkPath(path);
     const QString type = text(entry, "type");
     require(supportedEntryType(type), "Unsupported entry type");
-    require(source_ && source_->allows(path, type),
-            "Entry is outside the selected sources: " + path);
     currentEntry_ = {{"path", path},
                      {"type", type},
                      {"index", QString::number(entries_.count())}};
     for (const auto* key : {"link_group", "link_to", "target_base64",
-                            "device_major", "device_minor"})
+                            "device_major", "device_minor", "mode", "uid",
+                            "gid", "mtime_sec", "mtime_nsec"})
     {
         if (entry.contains(QLatin1String(key)))
         {
@@ -339,18 +363,23 @@ void Repository::addEntry(const QJsonObject& entry)
                                  entry.value(QLatin1String(key)));
         }
     }
+    if (type == "file")
+    {
+        currentEntry_.insert("size", QString::number(number(entry, "size")));
+    }
     if (type == "hardlink")
     {
         currentEntry_.insert("size", QString::number(number(entry, "size")));
         currentEntry_.insert("sha256", text(entry, "sha256"));
     }
+    require(source_ && source_->allows(currentEntry_),
+            "Entry is outside the selected sources or custom filters: " +
+                path);
     if (type != "file")
     {
         recordEntry(currentEntry_);
         return;
     }
-    const qint64 size = number(entry, "size");
-    currentEntry_.insert("size", QString::number(size));
     content_.setFileName(stagingPath_ + '/' +
                          QString::number(entries_.count()) + ".data");
     require(content_.open(QIODevice::WriteOnly | QIODevice::NewOnly),
@@ -425,7 +454,7 @@ QJsonObject Repository::commit(const QString& id, const QJsonArray& warnings)
         const auto path = text(value.toObject(), "path");
         require((value.toObject().value("type") == "directory" &&
                  !source_->includes("directory")) ||
-                    entries_.contains(path),
+                    entries_.contains(path) || source_->hasFilters(),
                 "Selected source missing from upload: " + path);
     }
     // Accept the original commit interface for existing clients.

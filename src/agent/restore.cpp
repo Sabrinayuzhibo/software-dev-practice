@@ -49,7 +49,7 @@ void fetchManifest(Channel& channel, const QString& versionId,
         for (const auto& value : page.value("entries").toArray())
         {
             const auto entry = value.toObject();
-            require(scope.allows(text(entry, "path"), text(entry, "type")),
+            require(scope.allows(entry),
                     "Manifest entry is outside the saved selection: " +
                         text(entry, "path"));
             catalog.append(entry, format);
@@ -111,6 +111,80 @@ void publishFile(int descriptor, int parent, const QByteArray& leaf)
                              QString::fromLocal8Bit(strerror(errno)));
 }
 
+void metadataWarning(QJsonObject& status, const QString& path,
+                     const QString& field, int error)
+{
+    const auto count = number(status, "metadata_warning_count") + 1;
+    status.insert("metadata_warning_count", count);
+    auto warnings = status.value("warnings").toArray();
+    if (warnings.size() < 100)
+    {
+        warnings.append(QJsonObject{
+            {"path", path},
+            {"type", "metadata"},
+            {"reason", field + ": " + QString::fromLocal8Bit(strerror(error))}});
+        status.insert("warnings", warnings);
+    }
+}
+
+void restoreMetadata(int descriptor, const QJsonObject& entry,
+                     QJsonObject& status)
+{
+    if (!entry.contains("mode"))
+    {
+        return;
+    }
+    const auto path = text(entry, "path");
+    if (::fchown(descriptor, static_cast<uid_t>(number(entry, "uid")),
+                 static_cast<gid_t>(number(entry, "gid"))) != 0)
+    {
+        metadataWarning(status, path, "owner/group", errno);
+    }
+    if (::fchmod(descriptor, static_cast<mode_t>(number(entry, "mode"))) != 0)
+    {
+        metadataWarning(status, path, "permissions", errno);
+    }
+    const timespec times[2] = {
+        {0, UTIME_OMIT},
+        {static_cast<time_t>(signedNumber(entry, "mtime_sec")),
+         static_cast<long>(number(entry, "mtime_nsec"))}};
+    if (::futimens(descriptor, times) != 0)
+    {
+        metadataWarning(status, path, "modification time", errno);
+    }
+}
+
+void restoreMetadataAt(int parent, const QByteArray& leaf,
+                       const QJsonObject& entry, QJsonObject& status)
+{
+    if (!entry.contains("mode"))
+    {
+        return;
+    }
+    const auto path = text(entry, "path");
+    if (::fchownat(parent, leaf.constData(),
+                   static_cast<uid_t>(number(entry, "uid")),
+                   static_cast<gid_t>(number(entry, "gid")),
+                   AT_SYMLINK_NOFOLLOW) != 0)
+    {
+        metadataWarning(status, path, "owner/group", errno);
+    }
+    if (text(entry, "type") != "symlink" &&
+        ::fchmodat(parent, leaf.constData(),
+                   static_cast<mode_t>(number(entry, "mode")), 0) != 0)
+    {
+        metadataWarning(status, path, "permissions", errno);
+    }
+    const timespec times[2] = {
+        {0, UTIME_OMIT},
+        {static_cast<time_t>(signedNumber(entry, "mtime_sec")),
+         static_cast<long>(number(entry, "mtime_nsec"))}};
+    if (::utimensat(parent, leaf.constData(), times, AT_SYMLINK_NOFOLLOW) != 0)
+    {
+        metadataWarning(status, path, "modification time", errno);
+    }
+}
+
 struct stat restoreFile(Channel& channel, const QString& versionId, int parent,
                         const QByteArray& leaf, const QJsonObject& entry,
                         const QByteArray& temporary, QJsonObject& status,
@@ -157,6 +231,7 @@ struct stat restoreFile(Channel& channel, const QString& versionId, int parent,
         require(offset == size && QString::fromLatin1(hash.result().toHex()) ==
                                       text(entry, "sha256"),
                 "Restored file checksum mismatch");
+        restoreMetadata(descriptor.get(), entry, status);
         syncFile(file);
         publishFile(descriptor.get(), parent, leaf);
         require(::unlinkat(parent, temporary.constData(), 0) == 0 &&
@@ -256,9 +331,12 @@ QJsonObject restoreTree(Channel& channel, const QString& versionId,
                        {"symlinks", 0},      {"hardlinks", 0},
                        {"fifos", 0},         {"character_devices", 0},
                        {"block_devices", 0}, {"sockets", 0},
+                       {"metadata_warning_count", 0},
+                       {"warnings", QJsonArray{}},
                        {"destination", destination}};
     QHash<QString, struct stat> groups;
     QHash<QString, QString> members;
+    QVector<QJsonObject> directories;
     while (!manifest.atEnd())
     {
         checkCancelled();
@@ -362,6 +440,14 @@ QJsonObject restoreTree(Channel& channel, const QString& versionId,
                 }
                 require(::fsync(directory.get()) == 0,
                         "Cannot persist restored " + type);
+                if (type == "directory")
+                {
+                    directories.append(entry);
+                }
+                else if (type == "symlink" || type == "fifo")
+                {
+                    restoreMetadataAt(directory.get(), leaf, entry, status);
+                }
             }
             const auto counter = type == "directory" ? "directories"
                                  : type == "symlink" ? "symlinks"
@@ -380,6 +466,22 @@ QJsonObject restoreTree(Channel& channel, const QString& versionId,
             throw Error(path + ": " + QString::fromUtf8(error.what()) +
                         "; partial restore at " + destination);
         }
+    }
+    for (auto item = directories.crbegin(); item != directories.crend(); ++item)
+    {
+        const auto path = text(*item, "path");
+        const auto slash = path.lastIndexOf('/');
+        Descriptor parent(slash < 0 ? ::dup(root)
+                                    : openBelow(root, path.left(slash),
+                                                O_RDONLY | O_DIRECTORY));
+        restoreMetadataAt(parent.get(), path.mid(slash + 1).toUtf8(), *item,
+                          status);
+        require(::fsync(parent.get()) == 0,
+                "Cannot persist restored directory metadata: " + path);
+    }
+    if (number(status, "metadata_warning_count") > 0)
+    {
+        status.insert("warning_count", number(status, "metadata_warning_count"));
     }
     for (auto member = members.begin(); member != members.end(); ++member)
     {
@@ -460,6 +562,12 @@ QJsonObject restore(const QJsonObject& args, const QJsonObject& target,
     require(::fsync(parent.get()) == 0, "Cannot persist restore directory");
     auto status = restoreTree(channel, versionId, manifest, root.get(), journal,
                               destination, progress);
+    if (summary.value("root_metadata").isObject())
+    {
+        auto metadata = summary.value("root_metadata").toObject();
+        metadata.insert("path", ".");
+        restoreMetadata(root.get(), metadata, status);
+    }
     require(::fsync(root.get()) == 0 && ::fsync(parent.get()) == 0,
             "Cannot persist restored tree");
     QJsonArray warnings;
@@ -477,7 +585,15 @@ QJsonObject restore(const QJsonObject& args, const QJsonObject& target,
                      ? -1
                      : number(page, "next_offset");
     } while (offset >= 0);
-    status.insert("warnings", warnings);
+    auto restoreWarnings = status.value("warnings").toArray();
+    for (const auto& warning : warnings)
+    {
+        if (restoreWarnings.size() < 100)
+        {
+            restoreWarnings.append(warning);
+        }
+    }
+    status.insert("warnings", restoreWarnings);
     return status;
 }
 } // namespace backup::agent

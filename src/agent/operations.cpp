@@ -6,6 +6,7 @@
 #include "backup/core/source_scope.h"
 
 #include <QThread>
+#include <sys/stat.h>
 
 namespace backup::agent
 {
@@ -45,6 +46,15 @@ QJsonObject backup(const QJsonObject& task, const QJsonObject& target,
         !source.overlaps(canonicalPath(text(channel.health(), "data_root"))),
         "Source overlaps repository");
     auto request = source.json("source");
+    struct stat rootInfo{};
+    require(::stat(QFile::encodeName(source.root()).constData(), &rootInfo) == 0,
+            "Cannot inspect source root metadata");
+    request.insert("root_metadata",
+                   QJsonObject{{"mode", static_cast<qint64>(rootInfo.st_mode & 0777)},
+                               {"uid", QString::number(rootInfo.st_uid)},
+                               {"gid", QString::number(rootInfo.st_gid)},
+                               {"mtime_sec", QString::number(rootInfo.st_mtim.tv_sec)},
+                               {"mtime_nsec", QString::number(rootInfo.st_mtim.tv_nsec)}});
     request.insert("operation_id", operationId);
     request.insert("task_id", text(task, "id"));
     if (task.contains("name"))
@@ -62,6 +72,9 @@ QJsonObject backup(const QJsonObject& task, const QJsonObject& target,
                 receipt.value("preserve_empty_dirs") ==
                     source.preservesEmptyDirectories(),
             "Server does not support empty directory rules; update the Server");
+    require(source.filters().isEmpty() ||
+                receipt.value("filters") == source.filters(),
+            "Server does not support custom filters; update the Server");
     auto result = sourceTree(task, &channel, progress);
     const auto warnings = result.value("warnings").toArray();
     qint64 warningOffset = 0;

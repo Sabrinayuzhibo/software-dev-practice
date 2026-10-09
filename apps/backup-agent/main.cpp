@@ -250,6 +250,14 @@ class CommandReader final : public QObject
             {
                 args.remove("preserve_empty_dirs");
             }
+            if (task.contains("filters"))
+            {
+                args.insert("filters", task.value("filters"));
+            }
+            else
+            {
+                args.remove("filters");
+            }
             args.insert("target_id", task.value("target_id"));
         }
         auto target = args.contains("target_id")
@@ -289,6 +297,10 @@ class CommandReader final : public QObject
         {
             record.insert("preserve_empty_dirs",
                           args.value("preserve_empty_dirs"));
+        }
+        if (args.contains("filters"))
+        {
+            record.insert("filters", args.value("filters"));
         }
         if (task.contains("name"))
         {

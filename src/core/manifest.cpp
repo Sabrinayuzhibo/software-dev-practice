@@ -66,6 +66,40 @@ void Manifest::append(const QJsonObject& entry, int format)
     require((!entry.contains("link_to") || type == "hardlink") &&
                 (!entry.contains("target_base64") || type == "symlink"),
             "Link fields do not match entry type: " + path);
+    if (format >= 4 && (type == "file" || type == "hardlink" ||
+                        type == "directory" || type == "symlink" ||
+                        type == "fifo"))
+    {
+        const QStringList metadataFields{"mode", "uid", "gid", "mtime_sec",
+                                         "mtime_nsec"};
+        const auto metadataCount = std::count_if(
+            metadataFields.cbegin(), metadataFields.cend(),
+            [&entry](const QString& field) { return entry.contains(field); });
+        require(metadataCount == 0 || metadataCount == metadataFields.size(),
+                "Incomplete file metadata: " + path);
+        if (metadataCount != 0)
+        {
+            const auto mode = number(entry, "mode");
+            const auto uid = number(entry, "uid");
+            const auto gid = number(entry, "gid");
+            signedNumber(entry, "mtime_sec");
+            const auto nanoseconds = number(entry, "mtime_nsec");
+            require(mode <= 0777 && uid <= std::numeric_limits<uid_t>::max() &&
+                        gid <= std::numeric_limits<gid_t>::max() &&
+                        nanoseconds < 1000000000,
+                    "Invalid file metadata: " + path);
+        }
+    }
+    else
+    {
+        for (const auto* field : {"mode", "uid", "gid", "mtime_sec",
+                                  "mtime_nsec"})
+        {
+            require(!entry.contains(QLatin1String(field)),
+                    "Metadata is not supported by this manifest format: " +
+                        path);
+        }
+    }
     const bool device = type == "character_device" || type == "block_device";
     require(device || (!entry.contains("device_major") &&
                        !entry.contains("device_minor")),

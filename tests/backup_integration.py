@@ -112,17 +112,22 @@ class Fixture:
 
 def tree(root):
     result = {}
-    for item in root.rglob("*"):
-        relative = item.relative_to(root).as_posix()
-        mode = item.lstat().st_mode
-        if stat.S_ISLNK(mode):
-            result[relative] = ("symlink", os.readlink(os.fsencode(item)))
-        elif stat.S_ISFIFO(mode):
-            result[relative] = "fifo"
-        elif stat.S_ISDIR(mode):
-            result[relative] = "directory"
-        elif stat.S_ISREG(mode):
-            result[relative] = hashlib.sha256(item.read_bytes()).hexdigest()
+    def walk(directory):
+        with os.scandir(directory) as entries:
+            for entry in entries:
+                item = Path(entry.path)
+                relative = item.relative_to(root).as_posix()
+                mode = entry.stat(follow_symlinks=False).st_mode
+                if stat.S_ISLNK(mode):
+                    result[relative] = ("symlink", os.readlink(os.fsencode(item)))
+                elif stat.S_ISFIFO(mode):
+                    result[relative] = "fifo"
+                elif stat.S_ISDIR(mode):
+                    result[relative] = "directory"
+                    walk(item)
+                elif stat.S_ISREG(mode):
+                    result[relative] = hashlib.sha256(item.read_bytes()).hexdigest()
+    walk(root)
     return result
 
 

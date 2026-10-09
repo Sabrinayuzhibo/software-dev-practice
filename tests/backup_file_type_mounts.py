@@ -69,7 +69,7 @@ def check(agent, server):
             assert all(selected_scan[field] == 1 for field in
                        ("character_devices", "block_devices", "sockets"))
             node_version = fixture.backup(selected["id"])
-            assert node_version["format"] == 3 and not node_version["warnings"]
+            assert node_version["format"] == 4 and not node_version["warnings"]
             node_directory = manifest_path(fixture, node_version)
             node_entries = {item["path"]: item for item in
                             (json.loads(line) for line in

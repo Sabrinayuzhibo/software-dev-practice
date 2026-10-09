@@ -20,9 +20,13 @@ def manifest_path(fixture, version):
     return fixture.root / "repository/storage/versions" / version["id"]
 
 
-def rewrite_manifest(directory, entries, version_format=3):
+def rewrite_manifest(directory, entries, version_format=4):
     """Keep checksum valid so tests exercise semantic validation, not SHA alone."""
     entries = [dict(item, index=str(index)) for index, item in enumerate(entries)]
+    if version_format < 4:
+        for item in entries:
+            for field in ("mode", "uid", "gid", "mtime_sec", "mtime_nsec"):
+                item.pop(field, None)
     data = b"".join(json.dumps(item, sort_keys=True, separators=(",", ":"),
                               ensure_ascii=False).encode() + b"\n" for item in entries)
     (directory / "entries.jsonl").write_bytes(data)
@@ -102,7 +106,7 @@ def check_round_trip(fixture):
     assert fixture.request("versions", {"target_id": "local"})["total"] == 0
 
     version = fixture.backup(task["id"])
-    assert version["format"] == 3 and len(version["warnings"]) == 1
+    assert version["format"] == 4 and len(version["warnings"]) == 1
     assert version["warnings"][0]["type"] == "socket"
     directory = manifest_path(fixture, version)
     entries = [json.loads(line) for line in (directory / "entries.jsonl").read_text().splitlines()]

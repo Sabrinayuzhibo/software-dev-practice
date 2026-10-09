@@ -238,7 +238,7 @@ def run(agent, server):
             assert node_scan["complete"] and node_scan["sockets"] == 2
             assert node_scan["files"] == 0 and not node_scan["warnings"]
             node_version = fixture.backup(nodes["id"])
-            assert node_version["format"] == 3 and node_version["sockets"] == "2"
+            assert node_version["format"] == 4 and node_version["sockets"] == "2"
             assert not node_version["warnings"]
             node_output = root / "socket-output"
             fixture.restore(node_version["id"], node_output)

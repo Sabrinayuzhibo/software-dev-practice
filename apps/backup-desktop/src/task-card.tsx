@@ -1,3 +1,4 @@
+import { GlassButton } from './glass-controls'
 import {
     Archive,
     File,
@@ -85,7 +86,7 @@ export function TaskCard({
                     </small>
                 </div>
                 <div className="task-actions">
-                    <button
+                    <GlassButton
                         className="scan-button"
                         disabled={busy}
                         onClick={() => void model.scanTask(task.id)}
@@ -102,8 +103,8 @@ export function TaskCard({
                               : scan
                                 ? '重新扫描'
                                 : '扫描预览'}
-                    </button>
-                    <button
+                    </GlassButton>
+                    <GlassButton
                         className="backup-button"
                         disabled={busy || !model.canBackup}
                         title={
@@ -121,8 +122,8 @@ export function TaskCard({
                             : backingUp
                               ? '备份中'
                               : '立即备份'}
-                    </button>
-                    <button
+                    </GlassButton>
+                    <GlassButton
                         className="icon-button task-versions"
                         title="查看此任务的备份版本"
                         aria-label="查看此任务的备份版本"
@@ -130,8 +131,8 @@ export function TaskCard({
                         onClick={() => model.viewVersions(task)}
                     >
                         <Archive size={17} />
-                    </button>
-                    <button
+                    </GlassButton>
+                    <GlassButton
                         className="icon-button"
                         disabled={busy}
                         title="移除任务"
@@ -139,7 +140,7 @@ export function TaskCard({
                         onClick={() => model.setRemoveCandidate(task)}
                     >
                         <Trash2 size={17} />
-                    </button>
+                    </GlassButton>
                 </div>
             </header>
             {preparingBackup && (
@@ -173,7 +174,7 @@ export function TaskCard({
                                 finishedAt={scan.finished_at}
                             />
                             <div className="scan-actions">
-                                <button
+                                <GlassButton
                                     className="backup-button scan-backup"
                                     disabled={
                                         busy ||
@@ -184,7 +185,7 @@ export function TaskCard({
                                 >
                                     <Upload size={16} />
                                     备份此任务
-                                </button>
+                                </GlassButton>
                             </div>
                         </>
                     ) : (

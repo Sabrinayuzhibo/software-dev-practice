@@ -1,3 +1,5 @@
+import { GlassButton } from './glass-controls'
+import { GlassInput, GlassSelect } from './glass-fields'
 import {
     Archive,
     ArrowDownToLine,
@@ -49,13 +51,13 @@ export function TargetsView({ model }: { model: ConsoleModel }) {
                                         '由本机服务管理'}
                                 </td>
                                 <td>
-                                    <button
+                                    <GlassButton
                                         disabled={mutating}
                                         onClick={() => setTargetDraft(item)}
                                     >
                                         <Settings size={16} />
                                         编辑
-                                    </button>
+                                    </GlassButton>
                                 </td>
                             </tr>
                         ))}
@@ -69,7 +71,7 @@ export function TargetsView({ model }: { model: ConsoleModel }) {
                 <h2>{targetDraft.id ? '编辑目标' : '新建目标'}</h2>
                 <label>
                     名称
-                    <input
+                    <GlassInput
                         required
                         maxLength={100}
                         value={targetDraft.name}
@@ -83,17 +85,17 @@ export function TargetsView({ model }: { model: ConsoleModel }) {
                 </label>
                 <label>
                     主机
-                    <input value="127.0.0.1" readOnly />
+                    <GlassInput value="127.0.0.1" readOnly />
                 </label>
                 <label>
                     模式
-                    <select value="local" disabled>
+                    <GlassSelect value="local" disabled>
                         <option value="local">本地仓库</option>
-                    </select>
+                    </GlassSelect>
                 </label>
                 <label className="repository-path">
                     仓库路径（可选）
-                    <input
+                    <GlassInput
                         value={targetDraft.repository_path || ''}
                         placeholder="留空使用当前服务的仓库"
                         onChange={(event) =>
@@ -106,7 +108,7 @@ export function TargetsView({ model }: { model: ConsoleModel }) {
                 </label>
                 <label>
                     端口
-                    <input
+                    <GlassInput
                         type="number"
                         min={1}
                         max={65535}
@@ -121,11 +123,11 @@ export function TargetsView({ model }: { model: ConsoleModel }) {
                     />
                 </label>
                 <div className="form-actions">
-                    <button className="backup-button" disabled={mutating}>
+                    <GlassButton className="backup-button" disabled={mutating}>
                         保存目标
-                    </button>
+                    </GlassButton>
                     {targetDraft.id && (
-                        <button
+                        <GlassButton
                             type="button"
                             onClick={() =>
                                 setTargetDraft({
@@ -136,7 +138,7 @@ export function TargetsView({ model }: { model: ConsoleModel }) {
                             }
                         >
                             取消编辑
-                        </button>
+                        </GlassButton>
                     )}
                 </div>
             </form>
@@ -164,7 +166,7 @@ export function VersionsView({ model }: { model: ConsoleModel }) {
             <div className="section-heading">
                 <label className="version-filter">
                     任务
-                    <select
+                    <GlassSelect
                         aria-label="筛选备份任务"
                         value={versionTaskId}
                         disabled={versionsLoading}
@@ -178,9 +180,9 @@ export function VersionsView({ model }: { model: ConsoleModel }) {
                                 {taskTitle(task)}
                             </option>
                         ))}
-                    </select>
+                    </GlassSelect>
                 </label>
-                <button
+                <GlassButton
                     disabled={
                         busy ||
                         versionsLoading ||
@@ -190,7 +192,7 @@ export function VersionsView({ model }: { model: ConsoleModel }) {
                 >
                     <RefreshCw size={16} />
                     刷新
-                </button>
+                </GlassButton>
             </div>
             {!versionError &&
                 !versionsLoading &&
@@ -213,10 +215,10 @@ export function VersionsView({ model }: { model: ConsoleModel }) {
                     <div className="empty-state">
                         <Archive size={32} />
                         <p>暂无备份版本</p>
-                        <button onClick={() => model.navigate('tasks')}>
+                        <GlassButton onClick={() => model.navigate('tasks')}>
                             <Folder size={16} />
                             前往备份任务
-                        </button>
+                        </GlassButton>
                     </div>
                 )}
             <div className="table-scroll">
@@ -299,13 +301,13 @@ export function VersionsView({ model }: { model: ConsoleModel }) {
                                         )}
                                 </td>
                                 <td>
-                                    <button
+                                    <GlassButton
                                         disabled={busy || versionsLoading}
                                         onClick={() => requestRestore(version)}
                                     >
                                         <ArrowDownToLine size={16} />
                                         还原到…
-                                    </button>
+                                    </GlassButton>
                                 </td>
                             </tr>
                         ))}
@@ -313,12 +315,12 @@ export function VersionsView({ model }: { model: ConsoleModel }) {
                 </table>
             </div>
             {versionNextOffset !== null && (
-                <button
+                <GlassButton
                     disabled={busy || versionsLoading}
                     onClick={() => void loadVersions(versionNextOffset)}
                 >
                     加载更多
-                </button>
+                </GlassButton>
             )}
         </section>
     )
@@ -331,14 +333,14 @@ export function TasksView({ model }: { model: ConsoleModel }) {
         <section>
             <div className="section-heading">
                 <span className="muted">{tasks.length} 个任务</span>
-                <button
+                <GlassButton
                     className="primary-button"
                     disabled={busy}
                     onClick={() => setCreating(true)}
                 >
                     <Plus size={17} />
                     新建任务
-                </button>
+                </GlassButton>
             </div>
             {tasks.length === 0 && (
                 <div className="empty-state">

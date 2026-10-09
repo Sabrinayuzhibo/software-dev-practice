@@ -53,6 +53,18 @@ Agent 将相同的警告明细按内容指纹共用保存在 `userData/agent/war
 
 WSLg 启动时优先使用原生 Wayland，避开 XWayland 对无边框窗口最大化和鼠标坐标的处理问题；没有 Wayland socket 时才使用 X11。需要诊断 X11 时可运行 `BACKUP_ELECTRON_PLATFORM=x11 ./scripts/run-agent.sh`。
 
+侧栏玻璃效果直接集成 [martin65536/liquid-glass-webgl](https://github.com/martin65536/liquid-glass-webgl) 的原版渲染器、着色器、按钮预设、背景图和按压弹簧动画。使用原版 Surface / Tinted Blue 按钮参数，文字和点击操作由 React 控件承载。源码固定在 `0b90f9fc1cea8c7e59825f9aff1cbb96674b5b80`；[来源、署名、适配记录及许可说明](apps/backup-desktop/src/vendor/liquid-glass/NOTICE.md) 随项目保存，AGPL-3.0 许可及署名说明也随桌面构建复制到 `licenses/`。分发组合应用时须遵守 AGPL-3.0，并提供对应版本的完整源码和构建说明。
+
+默认固定使用 Electron 自带的 SwiftShader 软件 WebGL，由 CPU 绘制。主进程在创建窗口前设置 `--use-gl=angle`、`--use-angle=swiftshader` 和 `--enable-unsafe-swiftshader`，通过启动脚本或直接启动 Electron 都生效；不要额外传入 `--disable-gpu` 或 `--disable-webgl`。软件渲染仅用于本地应用页面，窗口拒绝页面导航和新窗口。侧栏只在导航、按压、尺寸或窗口可见性变化时重绘，动画结束后停止绘制。
+
+WebGL 初始化失败或上下文丢失时会自动恢复；原上下文未恢复时重建画布，不重载任务页面。连续失败最多重试 4 次，重新激活窗口后可再尝试，恢复期间保留 CSS 选中态。操作系统资源耗尽或渲染进程故障仍可能使 WebGL 不可用。
+
+页面、弹窗及标题栏按钮使用上游胶囊按钮；主要操作用蓝色，移除操作保留红色。文件类型和保留空目录选项使用原版 Liquid Toggle，支持点击、拖动及空格键。输入框和选择框采用上游 Text Input 材质，新建、移除和还原弹窗采用上游 Dialog 材质、圆角和高光。文字、表单校验、禁用状态、焦点及下拉选项菜单由原生 DOM 管理；图形恢复期间仍可操作。
+
+简体中文字体优先使用苹果页面所用的 `SF Pro SC`、`PingFang SC`；系统没有这两种字体时，使用随应用提供的开源 Noto Sans SC。Apple [开发者字体下载许可](https://developer.apple.com/fonts/) 不允许将下载的 SF 字体嵌入本项目或用于非 Apple 平台产品，因此项目不安装或分发苹果字体；开源后备字库也不能保证字形与苹方完全相同。后备字库和 SIL OFL 1.1 许可说明随桌面构建分发，见 `apps/backup-desktop/public/licenses/noto-sans-sc-OFL.txt`。
+
+动画控件、静态输入框和大型弹窗分别共用各自的 WebGL 上下文，只绘制变化项，其余显示画布保留上一帧图像。大弹窗不会扩大开关的临时渲染缓冲；拖动位置直接跟随鼠标，按压形变和松手回弹保留上游动画。按钮、开关和输入框采用本地纯色背景；侧栏和弹窗采用上游壁纸，弹窗还包含原版遮罩，不采样其背后的实时 DOM 内容。任务卡片、表格、状态、进度条、折叠明细和滚动条使用配套 CSS 材质，保留数据页面的布局和可读性。
+
 WSLg 中没有 `/dev/dri/renderD*` 时，脚本在现有软件渲染模式下传入空的 `--render-node-override=`，避免 Chromium 探测不存在的 DRM 设备；不屏蔽其他错误日志。最小化期间继续更新任务状态，恢复窗口时同步焦点、最大化状态并请求重绘。修改启动参数和主进程代码后，需要关闭旧窗口并重新运行启动脚本。
 
 若终端显示 `built` 后看不到窗口，先区分编译完成和窗口显示：单独运行 `build/backup-agent` 没有图形窗口，`run-agent.sh` 才会同时启动 Electron。若 Electron、Renderer 与 Agent 均在运行，仍看不到窗口，可检查 `/mnt/wslg/weston.log`。出现 `rdp_allocate_shared_memory` 的 `Input/output error` 及窗口标题 `[WARN:COPY MODE]` 时，WSLg 已回退到图像复制模式，应检查宿主显示链路，不能只靠 Electron 的 `isVisible()` 或页面截图判断窗口正常。可在保存编辑内容、等待备份/还原结束并停止服务后，在 **Windows PowerShell** 执行 `wsl --shutdown`，再重新打开 WSL 并分别运行两个启动脚本验证。该命令会停止所有 WSL 发行版及其中的服务，也会断开 VS Code 的 WSL 会话；不由应用自动执行。

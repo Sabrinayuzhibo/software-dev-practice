@@ -1,0 +1,138 @@
+.glass-button {
+    position: relative;
+    isolation: isolate;
+    border-radius: 999px;
+    border-color: #dce2e6;
+    background: #fff;
+    box-shadow: 0 2px 6px rgb(28 47 59 / 8%);
+    color: #273b49;
+}
+.glass-button-label {
+    position: relative;
+    z-index: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: inherit;
+    gap: inherit;
+    pointer-events: none;
+}
+.glass-surface {
+    position: absolute;
+    left: -13px;
+    top: -13px;
+    width: calc(100% + 26px);
+    height: calc(100% + 26px);
+    z-index: -1;
+    pointer-events: none;
+    opacity: 0;
+}
+.glass-button[data-glass-state='active'],
+.glass-button[data-glass-state='active']:hover {
+    background: transparent;
+    border-color: transparent;
+    box-shadow: none;
+}
+[data-glass-state='active'] > .glass-surface {
+    opacity: 1;
+}
+.glass-button[data-glass-variant='primary'] {
+    background: #0088ff;
+    border-color: #0088ff;
+    color: #fff;
+}
+.glass-button[data-glass-variant='danger'] {
+    background: #b83232;
+    border-color: #b83232;
+    color: #fff;
+}
+.glass-button[data-glass-variant][data-glass-state='active'] {
+    background: transparent;
+    border-color: transparent;
+}
+.glass-button.icon-button {
+    width: 34px;
+    height: 34px;
+    flex: none;
+}
+.glass-button.special-type-toggle {
+    padding: 6px 10px;
+}
+.window-control.glass-button {
+    color: #f0f5f1;
+    box-shadow: none;
+    background: transparent;
+    margin-inline: 3px;
+}
+.window-control .glass-surface {
+    left: -12px;
+    top: -12px;
+    width: calc(100% + 24px);
+    height: calc(100% + 24px);
+    clip-path: inset(6px 8px);
+}
+.window-control.close:hover {
+    color: #ffb0ab;
+}
+.glass-switch {
+    position: relative;
+    isolation: isolate;
+    display: inline-block;
+    flex: 0 0 64px;
+    width: 64px;
+    height: 28px;
+}
+.glass-switch .glass-surface {
+    left: -12px;
+    top: -12px;
+    width: 88px;
+    height: 52px;
+}
+.glass-switch input[type='checkbox'] {
+    position: absolute;
+    inset: 0;
+    width: 64px;
+    height: 28px;
+    margin: 0;
+    opacity: 0;
+    z-index: 2;
+    cursor: pointer;
+    touch-action: pan-y;
+}
+.glass-switch-fallback {
+    position: absolute;
+    inset: 0;
+    border-radius: 999px;
+    background: #dedee0;
+    pointer-events: none;
+}
+.glass-switch-fallback::after {
+    content: '';
+    position: absolute;
+    left: 2px;
+    top: 2px;
+    width: 40px;
+    height: 24px;
+    border-radius: 999px;
+    background: white;
+    box-shadow: 0 1px 3px rgb(0 0 0 / 10%);
+}
+.glass-switch input:checked + .glass-switch-fallback {
+    background: #34c759;
+}
+.glass-switch input:checked + .glass-switch-fallback::after {
+    transform: translateX(20px);
+}
+.glass-switch[data-glass-state='active'] .glass-switch-fallback {
+    visibility: hidden;
+}
+.glass-switch:has(input:focus-visible) {
+    outline: 2px solid #176bad;
+    outline-offset: 4px;
+    border-radius: 999px;
+}
+.glass-switch:has(input:disabled) {
+    opacity: 0.5;
+}
+.glass-switch input:disabled {
+    cursor: default;
+}

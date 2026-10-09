@@ -4,6 +4,12 @@ import { promises as fs } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { AgentBridge } from './agent-bridge'
 
+// Select Electron's bundled CPU driver before Chromium creates any GPU process.
+// Keep this here so both the launcher and direct Electron starts use WebGL.
+app.commandLine.appendSwitch('use-gl', 'angle')
+app.commandLine.appendSwitch('use-angle', 'swiftshader')
+app.commandLine.appendSwitch('enable-unsafe-swiftshader')
+
 let bridge: AgentBridge
 let mainWindow: BrowserWindow | null = null
 
@@ -289,6 +295,11 @@ function createWindow(): void {
             backgroundThrottling: false,
         },
     })
+    // Only the bundled application may submit shaders to the software driver.
+    mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+    mainWindow.webContents.on('will-navigate', (event) =>
+        event.preventDefault(),
+    )
     const notifyMaximized = () => {
         const window = mainWindow
         if (window) {

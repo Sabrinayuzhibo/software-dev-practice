@@ -1,3 +1,5 @@
+import { GlassButton } from './glass-controls'
+import { GlassInput, GlassSelect } from './glass-fields'
 import {
     FilePlus,
     FolderPlus,
@@ -94,7 +96,7 @@ function SourceList({
                                         : item?.restore_path || '待检查'}
                                 </td>
                                 <td>
-                                    <button
+                                    <GlassButton
                                         className="icon-button remove-source"
                                         title="移除来源"
                                         aria-label={`移除来源 ${path}`}
@@ -102,7 +104,7 @@ function SourceList({
                                         onClick={() => onRemove(path)}
                                     >
                                         <X size={16} />
-                                    </button>
+                                    </GlassButton>
                                 </td>
                             </tr>
                         )
@@ -226,129 +228,138 @@ export function CreateTaskDialog({
     const disabled = pending || model.busy
     return (
         <Dialog title="新建备份任务" onClose={close}>
-            <form
-                id="create-task-form"
-                className="create-task-form"
-                onSubmit={(event) => {
-                    event.preventDefault()
-                    void save()
-                }}
-            >
-                <label>
-                    任务名称
-                    <input
-                        aria-label="任务名称"
-                        maxLength={120}
-                        value={name}
-                        placeholder={
-                            plan
-                                ? taskTitle(plan.scope)
-                                : '可选，默认使用来源名称'
-                        }
-                        disabled={model.mutating}
-                        onChange={(event) => setName(event.target.value)}
-                    />
-                </label>
-                <label>
-                    备份目标
-                    <select
-                        aria-label="新任务备份目标"
-                        value={targetId}
-                        disabled={disabled}
-                        onChange={(event) => {
-                            setTargetId(event.target.value)
-                            void preview(paths, event.target.value)
-                        }}
-                    >
-                        {model.config.targets.map((target) => (
-                            <option key={target.id} value={target.id}>
-                                {target.name}
-                            </option>
-                        ))}
-                    </select>
-                </label>
-            </form>
-            <FileTypePicker
-                selected={fileTypes}
-                preserveEmptyDirs={preserveEmptyDirs}
-                disabled={disabled}
-                onChange={(types) => {
-                    setFileTypes(types)
-                    void preview(paths, targetId, types)
-                }}
-                onEmptyDirectoryChange={(preserve) => {
-                    setPreserveEmptyDirs(preserve)
-                    void preview(paths, targetId, fileTypes, preserve)
-                }}
-            />
-            <div className="source-actions">
-                <button
-                    className="choose-files"
-                    disabled={disabled}
-                    onClick={() => void choose('files')}
+            <div className="create-task-body">
+                <form
+                    id="create-task-form"
+                    className="create-task-form"
+                    onSubmit={(event) => {
+                        event.preventDefault()
+                        void save()
+                    }}
                 >
-                    <FilePlus size={16} />
-                    添加文件
-                </button>
-                <button
-                    className="choose-folders"
+                    <label>
+                        任务名称
+                        <GlassInput
+                            aria-label="任务名称"
+                            maxLength={120}
+                            value={name}
+                            placeholder={
+                                plan
+                                    ? taskTitle(plan.scope)
+                                    : '可选，默认使用来源名称'
+                            }
+                            disabled={model.mutating}
+                            onChange={(event) => setName(event.target.value)}
+                        />
+                    </label>
+                    <label>
+                        备份目标
+                        <GlassSelect
+                            aria-label="新任务备份目标"
+                            value={targetId}
+                            disabled={disabled}
+                            onChange={(event) => {
+                                setTargetId(event.target.value)
+                                void preview(paths, event.target.value)
+                            }}
+                        >
+                            {model.config.targets.map((target) => (
+                                <option key={target.id} value={target.id}>
+                                    {target.name}
+                                </option>
+                            ))}
+                        </GlassSelect>
+                    </label>
+                </form>
+                <FileTypePicker
+                    selected={fileTypes}
+                    preserveEmptyDirs={preserveEmptyDirs}
                     disabled={disabled}
-                    onClick={() => void choose('folders')}
-                >
-                    <FolderPlus size={16} />
-                    添加文件夹
-                </button>
-                {fileTypes.some((type) => !defaultFileTypes.includes(type)) && (
-                    <button
-                        className="choose-special-path"
+                    onChange={(types) => {
+                        setFileTypes(types)
+                        void preview(paths, targetId, types)
+                    }}
+                    onEmptyDirectoryChange={(preserve) => {
+                        setPreserveEmptyDirs(preserve)
+                        void preview(paths, targetId, fileTypes, preserve)
+                    }}
+                />
+                <div className="source-actions">
+                    <GlassButton
+                        className="choose-files"
                         disabled={disabled}
-                        onClick={() => setShowManualPath(!showManualPath)}
+                        onClick={() => void choose('files')}
                     >
-                        <Plus size={16} />
-                        添加特殊路径
-                    </button>
-                )}
-                <span className="muted" role="status">
-                    {pending ? '正在检查来源' : `已选 ${paths.length} 项`}
-                </span>
-            </div>
-            {showManualPath && (
-                <div className="source-path-input">
-                    <input
-                        aria-label="特殊节点绝对路径"
-                        placeholder="设备或套接字绝对路径"
-                        value={manualPath}
+                        <FilePlus size={16} />
+                        添加文件
+                    </GlassButton>
+                    <GlassButton
+                        className="choose-folders"
                         disabled={disabled}
-                        onChange={(event) => setManualPath(event.target.value)}
-                        onKeyDown={(event) => {
-                            if (event.key === 'Enter' && manualPath.trim()) {
+                        onClick={() => void choose('folders')}
+                    >
+                        <FolderPlus size={16} />
+                        添加文件夹
+                    </GlassButton>
+                    {fileTypes.some(
+                        (type) => !defaultFileTypes.includes(type),
+                    ) && (
+                        <GlassButton
+                            className="choose-special-path"
+                            disabled={disabled}
+                            onClick={() => setShowManualPath(!showManualPath)}
+                        >
+                            <Plus size={16} />
+                            添加特殊路径
+                        </GlassButton>
+                    )}
+                    <span className="muted" role="status">
+                        {pending ? '正在检查来源' : `已选 ${paths.length} 项`}
+                    </span>
+                </div>
+                {showManualPath && (
+                    <div className="source-path-input">
+                        <GlassInput
+                            aria-label="特殊节点绝对路径"
+                            placeholder="设备或套接字绝对路径"
+                            value={manualPath}
+                            disabled={disabled}
+                            onChange={(event) =>
+                                setManualPath(event.target.value)
+                            }
+                            onKeyDown={(event) => {
+                                if (
+                                    event.key === 'Enter' &&
+                                    manualPath.trim()
+                                ) {
+                                    void preview([...paths, manualPath.trim()])
+                                    setManualPath('')
+                                }
+                            }}
+                        />
+                        <GlassButton
+                            className="icon-button"
+                            aria-label="添加路径"
+                            title="添加路径"
+                            disabled={disabled || !manualPath.trim()}
+                            onClick={() => {
                                 void preview([...paths, manualPath.trim()])
                                 setManualPath('')
-                            }
-                        }}
-                    />
-                    <button
-                        className="icon-button"
-                        aria-label="添加路径"
-                        title="添加路径"
-                        disabled={disabled || !manualPath.trim()}
-                        onClick={() => {
-                            void preview([...paths, manualPath.trim()])
-                            setManualPath('')
-                        }}
-                    >
-                        <Plus size={16} />
-                    </button>
-                </div>
-            )}
-            <SourceList
-                paths={paths}
-                plan={plan}
-                disabled={disabled}
-                onRemove={(path) =>
-                    void preview(paths.filter((value) => value !== path))
-                }
-            />
+                            }}
+                        >
+                            <Plus size={16} />
+                        </GlassButton>
+                    </div>
+                )}
+                <SourceList
+                    paths={paths}
+                    plan={plan}
+                    disabled={disabled}
+                    onRemove={(path) =>
+                        void preview(paths.filter((value) => value !== path))
+                    }
+                />
+            </div>
             {!!plan?.merged_count && (
                 <p className="muted" role="status">
                     已合并 {plan.merged_count} 项重复或被文件夹包含的来源
@@ -360,19 +371,19 @@ export function CreateTaskDialog({
                 </p>
             )}
             {error && paths.length > 0 && (
-                <button
+                <GlassButton
                     className="source-recheck"
                     disabled={disabled}
                     onClick={() => void preview(paths)}
                 >
                     重新检查
-                </button>
+                </GlassButton>
             )}
             <div className="dialog-actions">
-                <button disabled={model.mutating} onClick={close}>
+                <GlassButton disabled={model.mutating} onClick={close}>
                     取消
-                </button>
-                <button
+                </GlassButton>
+                <GlassButton
                     type="submit"
                     form="create-task-form"
                     className="backup-button create-task"
@@ -384,7 +395,7 @@ export function CreateTaskDialog({
                         <Plus size={16} />
                     )}
                     {model.mutating ? '正在创建' : '创建任务'}
-                </button>
+                </GlassButton>
             </div>
         </Dialog>
     )

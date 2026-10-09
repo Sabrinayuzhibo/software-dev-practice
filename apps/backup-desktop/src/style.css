@@ -1,5 +1,15 @@
+@font-face {
+    font-family: 'Backup Noto Sans SC';
+    src: url('./fonts/NotoSansSC-VF.woff2') format('woff2');
+    font-style: normal;
+    font-weight: 100 900;
+    font-display: swap;
+}
+
 :root {
-    font-family: Inter, 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif;
+    font-family:
+        'SF Pro SC', 'PingFang SC', 'SF Pro Text', 'Backup Noto Sans SC',
+        sans-serif;
     color: #27312f;
     background: #f7f8fa;
     font-synthesis: none;
@@ -126,30 +136,90 @@ select {
     min-height: 0;
 }
 .sidebar {
+    position: relative;
+    isolation: isolate;
     display: flex;
     flex-direction: column;
     width: 180px;
     flex: none;
     padding: 24px 12px 16px;
-    background: #eef1ef;
+    background: #bbdbe7 url('./vendor/liquid-glass/wallpaper_light.webp')
+        center / cover;
     border-right: 1px solid #dde3df;
+}
+.sidebar-glass {
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    width: 100%;
+    height: 100%;
+    opacity: 0;
+    pointer-events: none;
+}
+.sidebar-glass.ready {
+    opacity: 1;
+}
+.sidebar-glass-fallback {
+    position: absolute;
+    z-index: 0;
+    border: 1px solid rgb(255 255 255 / 95%);
+    border-radius: 24px;
+    background: linear-gradient(
+        125deg,
+        rgb(255 255 255 / 88%),
+        rgb(238 249 245 / 66%)
+    );
+    box-shadow:
+        inset 0 1px rgb(255 255 255 / 95%),
+        0 3px 12px rgb(37 66 54 / 9%);
+    backdrop-filter: blur(12px) saturate(1.18);
+    pointer-events: none;
+    transition:
+        top 280ms ease,
+        left 280ms ease,
+        width 280ms ease,
+        height 280ms ease,
+        opacity 120ms ease;
+}
+.sidebar-glass-fallback.hidden {
+    opacity: 0;
+}
+.sidebar-label,
+.nav-item,
+.sidebar-footer {
+    position: relative;
+    z-index: 1;
 }
 .sidebar-label {
     padding: 0 12px 18px;
     font-size: 11px;
-    color: #768078;
+    color: #fff;
+    text-shadow: 0 1px 3px #153d64;
 }
 .nav-item {
     justify-content: flex-start;
     margin-bottom: 6px;
     padding: 11px 12px;
-    border: 0;
+    border: 1px solid transparent;
+    border-radius: 24px;
+    background: transparent;
+    color: #122e40;
+}
+.nav-item:hover {
     background: transparent;
 }
 .nav-item.active {
-    background: #dce9e1;
-    color: #186441;
+    color: #fff;
     font-weight: 600;
+}
+.nav-item:focus-visible {
+    outline-color: #fff;
+}
+.sidebar:not(:has(.sidebar-glass.ready)) .nav-item {
+    background: rgb(255 255 255 / 50%);
+}
+.sidebar:not(:has(.sidebar-glass.ready)) .nav-item.active {
+    color: #144669;
 }
 .sidebar-footer {
     display: flex;
@@ -158,7 +228,8 @@ select {
     margin-top: auto;
     padding: 12px;
     font-size: 12px;
-    color: #69776f;
+    color: #fff;
+    text-shadow: 0 1px 3px #153d64;
 }
 .content {
     flex: 1;
@@ -195,7 +266,7 @@ p {
     color: #727d76;
     font-size: 12px;
 }
-.target-selector select {
+.target-selector .glass-field {
     width: 180px;
 }
 .status-panel {
@@ -349,8 +420,8 @@ small {
     flex-wrap: wrap;
 }
 .records-table .record-toggle-cell {
-    width: 28px;
-    padding: 8px 2px;
+    width: 54px;
+    padding: 8px 10px;
 }
 .scan-history-row {
     background: #f0f4f3;
@@ -373,7 +444,7 @@ small {
 }
 .records-table th:nth-child(4),
 .records-table td:nth-child(4) {
-    width: 100px;
+    width: 116px;
 }
 .records-table th:nth-child(5),
 .records-table td:nth-child(5) {
@@ -381,7 +452,7 @@ small {
 }
 .records-table th:last-child,
 .records-table td:last-child {
-    width: 64px;
+    width: 88px;
 }
 .folder-icon {
     color: #b0883e;
@@ -501,35 +572,56 @@ td.digest {
     max-width: calc(100% - 90px);
     font-size: 13px;
 }
-.version-filter select {
+.version-filter .glass-field {
     max-width: 350px;
     flex: 1;
 }
 .workflow-dialog {
     width: min(560px, calc(100vw - 40px));
     max-height: calc(100vh - 40px);
-    overflow: auto;
-    padding: 24px;
+    overflow: hidden;
+    padding: 0;
     border: 1px solid #cdd6d0;
     border-radius: 8px;
     color: #27312f;
     background: #fff;
     font-size: 13px;
 }
-.workflow-dialog::backdrop {
-    background: #19252b70;
+.workflow-dialog-content {
+    max-height: calc(100vh - 42px);
+    padding: 28px;
+    overflow: auto;
 }
 .workflow-dialog h2 {
     font-size: 18px;
 }
 .workflow-dialog:has(.create-task-form) {
+    width: min(760px, calc(100vw - 40px));
+}
+.workflow-dialog:has(.create-task-form) .workflow-dialog-content {
     display: flex;
     flex-direction: column;
-    width: min(760px, calc(100vw - 40px));
     overflow: hidden;
 }
 .workflow-dialog:has(.create-task-form) .section-heading {
     margin-bottom: 14px;
+}
+.workflow-dialog:has(.create-task-form) .workflow-dialog-content > * {
+    flex-shrink: 0;
+}
+.workflow-dialog:has(.create-task-form)
+    .workflow-dialog-content
+    > .create-task-body {
+    display: flex;
+    flex-direction: column;
+    flex: 0 1 auto;
+    min-height: 0;
+    overflow: auto;
+    margin-inline: -13px;
+    padding: 2px 13px 12px;
+}
+.create-task-body > * {
+    flex-shrink: 0;
 }
 .create-task-form {
     display: grid;
@@ -559,26 +651,17 @@ td.digest {
 }
 .file-type-options {
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 10px 14px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 18px 28px;
 }
 .file-type-options label,
 .empty-directory-option {
     display: inline-flex;
     align-items: center;
-    gap: 7px;
+    gap: 16px;
     min-width: 0;
-    white-space: nowrap;
+    white-space: normal;
     cursor: pointer;
-}
-.file-type-options input[type='checkbox'],
-.empty-directory-option input[type='checkbox'] {
-    width: 16px;
-    height: 16px;
-    min-width: 16px;
-    margin: 0;
-    padding: 0;
-    accent-color: #246c4d;
 }
 .empty-directory-option {
     margin-top: 0;
@@ -587,7 +670,8 @@ td.digest {
     display: flex;
     align-items: center;
     gap: 24px;
-    margin-top: 10px;
+    margin-top: 20px;
+    flex-wrap: wrap;
 }
 .special-type-toggle {
     display: inline-flex;
@@ -600,7 +684,7 @@ td.digest {
     cursor: pointer;
 }
 .special-file-types {
-    margin-top: 10px;
+    margin-top: 20px;
 }
 .file-type-summary {
     color: #326695;
@@ -615,6 +699,7 @@ td.digest {
     flex-shrink: 0;
     margin-top: 14px;
     padding-top: 12px;
+    padding-bottom: 8px;
     border-top: 1px solid #e1e6e3;
 }
 .source-recheck {
@@ -662,8 +747,8 @@ td.digest {
 }
 .source-list th:last-child,
 .source-list td:last-child {
-    width: 44px;
-    padding-inline: 6px;
+    width: 60px;
+    padding-inline: 12px;
 }
 .source-item-name {
     display: flex;
@@ -723,7 +808,8 @@ td.digest {
     display: flex;
     gap: 8px;
 }
-.directory-input input {
+.directory-input .glass-field,
+.source-path-input .glass-field {
     flex: 1;
 }
 .spinning {
@@ -737,6 +823,9 @@ td.digest {
 @media (prefers-reduced-motion: reduce) {
     .spinning {
         animation: none;
+    }
+    .sidebar-glass-fallback {
+        transition: none;
     }
 }
 .operation-panel {
@@ -804,10 +893,11 @@ summary {
 }
 .target-form {
     display: grid;
-    grid-template-columns: 1fr 1fr 100px;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 128px;
     gap: 14px;
-    padding-top: 20px;
-    max-width: 680px;
+    padding: 20px 13px 13px;
+    margin-inline: -13px;
+    max-width: 706px;
 }
 .target-form h2,
 .repository-path,
@@ -846,7 +936,7 @@ summary {
     .create-task-form {
         grid-template-columns: minmax(0, 1fr);
     }
-    .workflow-dialog {
+    .workflow-dialog-content {
         padding: 16px;
     }
 }

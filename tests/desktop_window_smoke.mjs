@@ -20,6 +20,9 @@ import { checkP0 } from './desktop_p0_checks.mjs'
 import { checkFileTypes } from './desktop_file_types.mjs'
 import { checkSources, createFolderTask } from './desktop_sources.mjs'
 import { checkTypeFilter } from './desktop_type_filter.mjs'
+import { checkGlass, requireGlass } from './desktop_glass.mjs'
+import { checkGlassControls } from './desktop_controls.mjs'
+import { checkGlassFields } from './desktop_glass_fields.mjs'
 
 const root = fileURLToPath(new URL('../', import.meta.url))
 const execute = promisify(execFile)
@@ -211,6 +214,21 @@ try {
             ),
         'React title bar',
     )
+    await requireGlass(page, until)
+    const glassState = await page.evaluate(`(() => {
+      const canvas = document.querySelector('.sidebar-glass');
+      const fallback = document.querySelector('.sidebar-glass-fallback');
+      return {
+        state: canvas?.dataset.glassState,
+        pointerEvents: canvas && getComputedStyle(canvas).pointerEvents,
+        fallbackWidth: fallback?.getBoundingClientRect().width,
+        fallbackPointerEvents: fallback && getComputedStyle(fallback).pointerEvents,
+      };
+    })()`)
+    assert.equal(glassState.state, 'active')
+    assert.equal(glassState.pointerEvents, 'none')
+    assert.ok(glassState.fallbackWidth > 0)
+    assert.equal(glassState.fallbackPointerEvents, 'none')
     await main.evaluate(`
     globalThis.testElectron = process.mainModule.require('electron');
     globalThis.testWindow = testElectron.BrowserWindow.getAllWindows()[0];
@@ -231,24 +249,33 @@ try {
         () => main.evaluate('!testWindow.isMaximized()'),
         'initial restore',
     )
+    await checkGlass({ page, main, click, until })
+    await checkGlassControls({ page, click, until })
+    await checkGlassFields({ page, click, until })
     await page.evaluate(`
     globalThis.windowTestClicks = [];
     document.addEventListener('click', event => {
       const button = event.target.closest('button');
       if (button) windowTestClicks.push({
         label: button.getAttribute('aria-label') || button.className,
+        classes: [...button.classList],
         trusted: event.isTrusted,
       });
     }, true);
   `)
 
     async function click(selector) {
-        const point = await page.evaluate(`(() => {
+        let point
+        await until(async () => {
+            point = await page.evaluate(`(() => {
       const element = document.querySelector(${JSON.stringify(selector)});
+      if (!element) return null;
       element.scrollIntoView({ block: 'center' });
       const r = element.getBoundingClientRect();
       return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
     })()`)
+            return point !== null
+        }, `mouse target ${selector}`)
         await page.call('Input.dispatchMouseEvent', {
             type: 'mouseMoved',
             ...point,
@@ -283,7 +310,7 @@ try {
             const events = await page.evaluate('windowTestClicks')
             return (
                 events.length > before &&
-                events.at(-1).label === 'text-button' &&
+                events.at(-1).classes.includes('text-button') &&
                 events.at(-1).trusted
             )
         }, 'refresh mouse input')
@@ -1339,7 +1366,11 @@ try {
     globalThis.windowTestClicks = [];
     document.addEventListener('click', event => {
       const button = event.target.closest('button');
-      if (button) windowTestClicks.push({ label: button.getAttribute('aria-label') || button.className, trusted: event.isTrusted });
+      if (button) windowTestClicks.push({
+        label: button.getAttribute('aria-label') || button.className,
+        classes: [...button.classList],
+        trusted: event.isTrusted,
+      });
     }, true);
   `)
     await click('.window-control:first-child')
@@ -1359,6 +1390,7 @@ try {
         'restore visibility',
     )
     await refresh()
+    await requireGlass(page, until)
     console.log('PASS: minimize, restore and refresh')
     try {
         await click('.window-control.close')

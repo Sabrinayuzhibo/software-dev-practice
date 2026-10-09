@@ -1,0 +1,212 @@
+/* Passive data surfaces use the catalog palette without continuous WebGL work. */
+:root {
+    color: #293743;
+    background: #f7f8fa;
+    --glass-line: rgb(105 132 151 / 18%);
+    --glass-muted: #627581;
+}
+.app-shell {
+    background: #dceaf2 url('./vendor/liquid-glass/wallpaper_light.webp')
+        center / cover;
+}
+.content {
+    background: rgb(247 248 250 / 94%);
+}
+.topbar h1 {
+    color: #253b4b;
+}
+.status-panel {
+    border-color: var(--glass-line);
+}
+.status-copy span,
+.muted,
+small,
+.task-copy span,
+.target-selector,
+.target-form label,
+.metrics,
+.restore-summary dt {
+    color: var(--glass-muted);
+}
+.status-dot {
+    box-shadow: 0 0 0 4px rgb(193 148 41 / 10%);
+}
+.status-dot.online {
+    background: #24a467;
+    box-shadow: 0 0 0 4px rgb(36 164 103 / 10%);
+}
+.status-dot.offline,
+.status-dot.storage-unavailable {
+    box-shadow: 0 0 0 4px rgb(195 80 74 / 10%);
+}
+.task-card {
+    border-color: rgb(255 255 255 / 95%);
+    border-radius: 8px;
+    background: rgb(255 255 255 / 72%);
+    box-shadow:
+        0 2px 10px rgb(48 73 95 / 5%),
+        inset 0 0 0 1px var(--glass-line);
+}
+.task-card.has-preview {
+    box-shadow:
+        0 2px 10px rgb(48 73 95 / 5%),
+        inset 0 0 0 1px rgb(0 136 255 / 35%);
+}
+.task-preview,
+.task-scan-status,
+.task-backup-status,
+.file-type-picker,
+.source-list,
+.source-empty,
+.workflow-dialog .dialog-actions {
+    border-color: var(--glass-line);
+}
+.task-preview {
+    background: rgb(241 246 250 / 35%);
+}
+.table-scroll {
+    border-block: 1px solid var(--glass-line);
+}
+th {
+    background: #ecf1f5;
+    color: #526978;
+    font-weight: 600;
+}
+th,
+td {
+    border-bottom-color: var(--glass-line);
+}
+tbody tr:last-child > td {
+    border-bottom: 0;
+}
+tbody tr:hover {
+    background: rgb(255 255 255 / 65%);
+}
+.scan-history-row {
+    background: rgb(226 237 246 / 52%);
+}
+.state-label {
+    display: inline-block;
+    max-width: 100%;
+    padding: 3px 8px;
+    border: 1px solid rgb(0 136 255 / 14%);
+    border-radius: 6px;
+    background: rgb(0 136 255 / 8%);
+    color: #17639b;
+    line-height: 1.6;
+    box-shadow: inset 0 1px rgb(255 255 255 / 75%);
+}
+.state-label-succeeded {
+    color: #216c46;
+    background: rgb(52 199 89 / 10%);
+    border-color: rgb(52 199 89 / 20%);
+}
+.state-label-failed,
+.state-label-interrupted {
+    color: #a43737;
+    background: rgb(219 72 72 / 8%);
+    border-color: rgb(219 72 72 / 18%);
+}
+.state-label-waiting,
+.state-label-succeeded_with_warnings {
+    color: #855f1c;
+    background: rgb(214 163 38 / 11%);
+    border-color: rgb(214 163 38 / 23%);
+}
+.message-banner {
+    background: rgb(255 245 214 / 80%);
+    border-left-color: #d3a041;
+    box-shadow: inset 0 1px rgb(255 255 255 / 80%);
+}
+.empty-state > svg {
+    color: #829eaf;
+}
+.operation-panel {
+    border-top-color: #0088ff;
+    border-bottom-color: var(--glass-line);
+}
+.operation-panel.state-failed,
+.operation-panel.state-interrupted {
+    border-top-color: #c85757;
+}
+.operation-panel.state-waiting,
+.operation-panel.state-succeeded_with_warnings {
+    border-top-color: #c59533;
+}
+summary {
+    width: fit-content;
+    max-width: 100%;
+    padding: 5px 0;
+    border-radius: 4px;
+    line-height: 1.6;
+    overflow-wrap: anywhere;
+}
+summary::marker {
+    color: #7794a8;
+}
+summary:hover {
+    color: #006fc9;
+}
+summary:focus-visible,
+button:focus-visible {
+    outline: 2px solid #0088ff;
+    outline-offset: 3px;
+}
+.metrics {
+    gap: 16px 24px;
+}
+.metrics strong {
+    color: #293e4d;
+    font-variant-numeric: tabular-nums;
+}
+progress {
+    appearance: none;
+    display: block;
+    height: 6px;
+    margin-block: 12px;
+    border: 0;
+    border-radius: 999px;
+    overflow: hidden;
+}
+progress::-webkit-progress-bar {
+    border-radius: 999px;
+    background: #dde7ee;
+    box-shadow: inset 0 1px 2px rgb(41 62 79 / 12%);
+}
+progress::-webkit-progress-value {
+    border-radius: 999px;
+    background: #0088ff;
+    box-shadow: inset 0 1px 1px rgb(255 255 255 / 50%);
+}
+progress:indeterminate {
+    background: linear-gradient(90deg, #dde7ee 30%, #0088ff 50%, #dde7ee 70%);
+    background-size: 240% 100%;
+    animation: glass-progress 1.6s ease-in-out infinite alternate;
+}
+progress:indeterminate::-webkit-progress-bar {
+    background: transparent;
+}
+@keyframes glass-progress {
+    from {
+        background-position: 100% 0;
+    }
+    to {
+        background-position: 0 0;
+    }
+}
+.content,
+.workflow-dialog-content,
+.create-task-body,
+.table-scroll,
+.warning-list,
+.source-details ul {
+    scrollbar-width: thin;
+    scrollbar-color: #a3b5c2 transparent;
+    overscroll-behavior: contain;
+}
+@media (prefers-reduced-motion: reduce) {
+    progress:indeterminate {
+        animation: none;
+        background-position: 50% 0;
+    }
+}

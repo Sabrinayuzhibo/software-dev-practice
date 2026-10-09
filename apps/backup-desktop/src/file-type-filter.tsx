@@ -1,3 +1,4 @@
+import { GlassButton, GlassSwitch } from './glass-controls'
 import { ChevronDown, ChevronUp } from 'lucide-react'
 import { useState } from 'react'
 import type { ContentFileType, FileType } from './types'
@@ -47,20 +48,17 @@ export function FileTypePicker({
     const [specialExpanded, setSpecialExpanded] = useState(false)
     const option = (type: ContentFileType) => (
         <label key={type} data-file-type={type} title={hints[type]}>
-            <input
-                type="checkbox"
+            <GlassSwitch
                 checked={selected.includes(type)}
-                onChange={(event) =>
+                onCheckedChange={(checked) =>
                     onChange(
                         supportedFileTypes.filter((item) =>
-                            item === type
-                                ? event.target.checked
-                                : selected.includes(item),
+                            item === type ? checked : selected.includes(item),
                         ),
                     )
                 }
             />
-            {labels[type]}
+            <span>{labels[type]}</span>
         </label>
     )
     return (
@@ -69,36 +67,32 @@ export function FileTypePicker({
             <div className="file-type-options">
                 {defaultFileTypes.map(option)}
                 <label className="all-file-types">
-                    <input
-                        type="checkbox"
+                    <GlassSwitch
                         checked={defaultFileTypes.every((type) =>
                             selected.includes(type),
                         )}
-                        onChange={(event) =>
+                        onCheckedChange={(checked) =>
                             onChange(
                                 supportedFileTypes.filter((type) =>
                                     specialFileTypes.includes(type)
                                         ? selected.includes(type)
-                                        : event.target.checked,
+                                        : checked,
                                 ),
                             )
                         }
                     />
-                    常用全选
+                    <span>常用全选</span>
                 </label>
             </div>
             <div className="file-type-secondary">
                 <label className="empty-directory-option">
-                    <input
-                        type="checkbox"
+                    <GlassSwitch
                         checked={preserveEmptyDirs}
-                        onChange={(event) =>
-                            onEmptyDirectoryChange(event.target.checked)
-                        }
+                        onCheckedChange={onEmptyDirectoryChange}
                     />
-                    保留空目录
+                    <span>保留空目录</span>
                 </label>
-                <button
+                <GlassButton
                     type="button"
                     className="special-type-toggle"
                     aria-expanded={specialExpanded}
@@ -110,7 +104,7 @@ export function FileTypePicker({
                         <ChevronDown size={15} />
                     )}
                     设备与套接字
-                </button>
+                </GlassButton>
             </div>
             {specialExpanded && (
                 <div className="file-type-options special-file-types">

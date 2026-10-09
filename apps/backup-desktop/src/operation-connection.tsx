@@ -1,3 +1,4 @@
+import { GlassButton } from './glass-controls'
 import { RefreshCw } from 'lucide-react'
 import type { ConsoleModel } from './use-backup-console'
 
@@ -20,10 +21,10 @@ export function OperationConnection({
                     : '暂时无法读取执行状态，正在重试。'}
             </p>
             {status.lost && (
-                <button onClick={model.retryOperation}>
+                <GlassButton onClick={model.retryOperation}>
                     <RefreshCw size={14} />
                     重新查询状态
-                </button>
+                </GlassButton>
             )}
             <details>
                 <summary>连接详情</summary>

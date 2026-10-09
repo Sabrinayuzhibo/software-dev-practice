@@ -1,3 +1,4 @@
+import { GlassButton } from './glass-controls'
 import {
     Archive,
     ChevronDown,
@@ -106,30 +107,30 @@ export function TitleBar() {
                 本地备份
             </div>
             <div className="window-controls" role="group" aria-label="窗口控制">
-                <button
+                <GlassButton
                     className="window-control"
                     title="最小化"
                     aria-label="最小化"
                     onClick={() => void window.backup.minimizeWindow()}
                 >
                     <Minus />
-                </button>
-                <button
+                </GlassButton>
+                <GlassButton
                     className="window-control"
                     title={maximized ? '还原' : '最大化'}
                     aria-label={maximized ? '还原' : '最大化'}
                     onClick={() => void window.backup.toggleMaximizeWindow()}
                 >
                     {maximized ? <Maximize /> : <Square />}
-                </button>
-                <button
+                </GlassButton>
+                <GlassButton
                     className="window-control close"
                     title="关闭"
                     aria-label="关闭"
                     onClick={() => void window.backup.closeWindow()}
                 >
                     <X />
-                </button>
+                </GlassButton>
             </div>
         </div>
     )
@@ -156,7 +157,7 @@ export function ScanPreview({
                         </time>
                     )}
                 </div>
-                <button
+                <GlassButton
                     className="icon-button preview-toggle"
                     aria-label={
                         expanded ? '收起扫描文件明细' : '展开扫描文件明细'
@@ -170,7 +171,7 @@ export function ScanPreview({
                     ) : (
                         <ChevronDown size={18} />
                     )}
-                </button>
+                </GlassButton>
             </div>
             <div className="metrics">
                 <span>

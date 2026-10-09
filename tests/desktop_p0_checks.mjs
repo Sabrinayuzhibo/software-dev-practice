@@ -21,6 +21,7 @@ export async function checkP0({
             const button = event.target.closest('button');
             if (button) windowTestClicks.push({
                 label: button.getAttribute('aria-label') || button.className,
+                classes: [...button.classList],
                 trusted: event.isTrusted,
             });
         }, true);

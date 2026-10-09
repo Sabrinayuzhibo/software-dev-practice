@@ -300,10 +300,12 @@ export async function checkTypeFilter({ page, main, click, until, temporary }) {
             ),
         'no matching files message',
     )
-    assert(
-        await page.evaluate(
-            `document.querySelector(${JSON.stringify(futureCard + ' .scan-backup')})?.disabled === false`,
-        ),
+    // Completion refreshes target health asynchronously before backup unlocks.
+    await until(
+        () =>
+            page.evaluate(
+                `document.querySelector(${JSON.stringify(futureCard + ' .scan-backup')})?.disabled === false`,
+            ),
         'empty result does not disable task backup',
     )
     console.log(

@@ -1,3 +1,4 @@
+import { GlassButton } from './glass-controls'
 import { useEffect, useRef, useState } from 'react'
 import { RefreshCw } from 'lucide-react'
 import type { Warning, WarningPage } from './types'
@@ -95,13 +96,13 @@ export function WarningDetails({
                     已显示 {warnings.length} / {count}
                 </small>
                 {nextOffset !== null && (
-                    <button disabled={loading} onClick={() => void load()}>
+                    <GlassButton disabled={loading} onClick={() => void load()}>
                         <RefreshCw
                             size={14}
                             className={loading ? 'spinning' : ''}
                         />
                         {loading ? '加载中' : error ? '重试' : '加载更多'}
-                    </button>
+                    </GlassButton>
                 )}
             </div>
         </details>

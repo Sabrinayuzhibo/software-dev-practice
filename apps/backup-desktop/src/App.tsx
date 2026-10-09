@@ -1,3 +1,5 @@
+import { GlassButton } from './glass-controls'
+import { GlassSelect } from './glass-fields'
 import {
     Archive,
     Folder,
@@ -7,12 +9,15 @@ import {
     ShieldCheck,
     X,
 } from 'lucide-react'
-import { useEffect, useRef } from 'react'
+import { lazy, Suspense, useEffect, useRef } from 'react'
 import { TitleBar } from './ui'
 import { useBackupConsole } from './use-backup-console'
 import { TargetsView, TasksView, VersionsView } from './views'
 import { RecordsView } from './records-view'
 import { OperationPanel, WorkflowDialogs } from './workflow'
+const SidebarGlass = lazy(async () => ({
+    default: (await import('./sidebar-glass')).SidebarGlass,
+}))
 
 export default function App() {
     const model = useBackupConsole()
@@ -50,6 +55,9 @@ export default function App() {
             <TitleBar />
             <div className="app-shell">
                 <aside className="sidebar">
+                    <Suspense fallback={null}>
+                        <SidebarGlass activeTab={tab} />
+                    </Suspense>
                     <div className="sidebar-label">工作空间</div>
                     {tabs.map((item) => (
                         <button
@@ -73,7 +81,7 @@ export default function App() {
                         <h1>{tabs.find((item) => item.id === tab)?.title}</h1>
                         <label className="target-selector">
                             备份目标
-                            <select
+                            <GlassSelect
                                 value={targetId}
                                 disabled={busy}
                                 onChange={(event) =>
@@ -85,7 +93,7 @@ export default function App() {
                                         {item.name}
                                     </option>
                                 ))}
-                            </select>
+                            </GlassSelect>
                         </label>
                     </header>
                     <section className="status-panel">
@@ -103,7 +111,7 @@ export default function App() {
                                 </details>
                             )}
                         </div>
-                        <button
+                        <GlassButton
                             className="text-button"
                             title="检查备份目标连接"
                             disabled={busy || connection.state === 'checking'}
@@ -120,19 +128,19 @@ export default function App() {
                             {connection.state === 'checking'
                                 ? '检查中'
                                 : '重新检查'}
-                        </button>
+                        </GlassButton>
                     </section>
                     {message && (
                         <div className="message-banner" role="alert">
                             <span>{message}</span>
-                            <button
+                            <GlassButton
                                 className="icon-button"
                                 title="关闭提示"
                                 aria-label="关闭提示"
                                 onClick={() => setMessage('')}
                             >
                                 <X size={16} />
-                            </button>
+                            </GlassButton>
                         </div>
                     )}
                     {model.preparingRestore && tab === 'versions' && (

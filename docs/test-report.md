@@ -1,5 +1,131 @@
 # 软件测试报告（草稿）
 
+## 2026-10-09 弹窗玻璃首帧与字体授权
+
+执行者：Codex 自动化运行。核对 Apple 开发者字体下载页 `https://developer.apple.com/fonts/` 的 SF 字体许可：下载版仅可用于指定 Apple 平台产品的界面稿，不允许嵌入应用或用于非 Apple 系统产品；没有安装或分发苹果字体。当前项目已经分发 SIL OFL 1.1 的 Noto Sans SC，它在本机实际承担中文绘制，但与苹方不可能做到字形完全相同。
+
+在隔离的 WSLg / SwiftShader Electron 窗口，用 `/tmp/backup-sheet-perf.mjs` 记录点击“新建任务”到弹窗 `data-glass-state=active` 的耗时，并用 CPU profile 和 WebGL API 时间定位耗时。修改前连续 3 次为 835、823、826 ms；`gl.getError()` 在大弹窗绘制后同步等待约 420–450 ms，按钮渲染器在同一图形队列上也会产生额外等待。移除逐帧同步错误轮询后，保留异常捕获和上下文丢失恢复；弹窗等待首帧期间改用带色调和模糊的 CSS 玻璃回退，WebGL 激活后切换至原材质。未降低弹窗或按钮画布分辨率。
+
+| 验证 / 命令 | 实际结果 |
+| --- | --- |
+| `node /tmp/backup-sheet-perf.mjs` | 修改后 3 次为 343、195、161 ms；弹窗内部画布保持 782×620，测量环境与修改前相同。单次数据受 SwiftShader 调度影响，不代表其他机器保证值 |
+| `./scripts/build.sh` | Meson 13/13 通过；TypeScript 和 Vite 构建通过 |
+| `node /tmp/backup-control-check.mjs` | Playwright 实窗点击、键盘、拖动、窄窗口、DPR2、上下文恢复与截图通过；中文标题仍由打包的 Noto Sans SC 绘制 |
+| `node tests/desktop_window_smoke.mjs` | 第二次完整回归通过，含新增的“玻璃控件不调用同步 `getError`”、弹窗回退材质及原有像素、表单状态和上下文恢复检查。第一次在既有的开关模拟点击断言处失败，复测通过，原因未定位 |
+
+截图 `/tmp/backup-controls-dialog.png`、`/tmp/backup-controls-narrow.png`、`/tmp/backup-controls-dpr2.png` 已目视检查：玻璃非空，标题、控件和底部操作区无重叠。未在 macOS、Windows 或硬件 GPU 上验收；不应把本机性能数据外推到其他环境。
+
+## 2026-10-09 简体中文字体
+
+执行者：Codex 自动化运行。根据 Apple 官方支持页面 `https://support.apple.com/en-us/103203` 的简体中文 CSS 字体栈，优先使用系统 `SF Pro SC`、`PingFang SC`。当前 WSL 没有这两种字体，因此将 Noto Sans SC 可变字库转换为 WOFF2（约 7.8 MB）随应用分发，并附带 SIL Open Font License 1.1。苹果字体文件没有纳入项目；macOS 有对应系统字体时可直接使用，WSL 使用后备字体。
+
+| 验证 / 命令 | 实际结果 |
+| --- | --- |
+| `./scripts/build.sh` | 13 个 Meson 套件通过，0 失败、0 跳过；TypeScript 与 Vite 构建通过，WOFF2 与许可证均进入桌面构建 |
+| `env DISPLAY=:89 BACKUP_ELECTRON_PLATFORM=x11 node /tmp/backup-control-check.mjs` | 真实 Electron + Chromium 字体诊断确认“备份任务”标题使用自定义加载的 Noto Sans SC（4 个字形）；1100/850 px、DPR=2 截图及玻璃控件交互通过 |
+| `env DISPLAY=:89 BACKUP_ELECTRON_PLATFORM=x11 npm run test:window --prefix apps/backup-desktop` | 完整桌面回归通过：中文文件名、长路径、单文件/多文件、类型筛选、扫描、备份、还原、记录和窗口恢复；850 px 下表格与弹窗无横向溢出 |
+| 格式 | 改动的 CSS/MJS 经 Prettier 检查通过，`git diff --check` 通过 |
+
+Apple 字体只在已安装的系统上显示。本机检查证实 Noto 后备字体生效，未在 macOS 上验收 `SF Pro SC`/`PingFang SC` 的实际字形。截图为 `/tmp/backup-controls-{desktop,dialog,narrow,dpr2}.png`、`/tmp/backup-records-grouped-narrow.png` 与 `/tmp/backup-type-filter-folder-composer-850.png`。
+
+## 2026-10-09 玻璃输入框、弹窗与数据页面
+
+执行者：Codex 自动化运行，遵循 huawei-coding。沿用下文记录的上游固定提交，导入原版 Text Input 材质，并从 Dialog 构建器提取原版圆角、折射、模糊、高光和遮罩参数。原生 DOM 继续管理输入、下拉菜单、表单校验、焦点和对话框；任务卡片、表格、状态标签、折叠明细、进度及滚动条使用配套 CSS。未增加演示项目中的无关页面。
+
+动画控件、静态输入框和弹窗使用独立的共享渲染器，避免大弹窗扩大开关每帧使用的缓冲区。按钮、开关和输入框使用本地纯色背景，弹窗使用上游壁纸与遮罩；玻璃不采样背后的实时 DOM 内容。模态框关闭后释放对应渲染器。
+
+| 验证 / 命令 | 实际结果 |
+| --- | --- |
+| `./scripts/build.sh` | 13 个 Meson 套件全部通过，0 失败、0 跳过；TypeScript 检查和 Vite 构建通过。之后的前端细节修正由桌面测试启动脚本重新构建 |
+| `tests/desktop_glass_fields.mjs` | 原生键盘输入、弹窗中心与透明圆角像素检查通过；同时注入输入框及弹窗上下文丢失，恢复期间仍可输入，恢复后内容、焦点和动画控件的原上下文保持不变；Escape 关闭、资源释放及重新打开通过 |
+| `env DISPLAY=:89 BACKUP_ELECTRON_PLATFORM=x11 npm run test:window --prefix apps/backup-desktop` | 最终完整回归通过，覆盖扫描、备份、还原、异常反馈、历史分页、单文件/多文件/文件夹、长路径、类型筛选与特殊节点；1120px/850px 布局、5 次最大化/还原及最小化恢复通过。文件选择器返回值由测试注入，未人工操作系统选择窗口 |
+| `env DISPLAY=:89 BACKUP_ELECTRON_PLATFORM=x11 node /tmp/backup-control-check.mjs` | Playwright 连接真实 Electron；1120×760、850×600、DPR=2 截图与按钮/开关交互通过。目标表单的只读/禁用状态保持；进度条两次截图不同，“减少动态效果”下停止动画；未出现页面异常或 WebGL 绘制错误 |
+| `env DISPLAY=:89 BACKUP_ELECTRON_PLATFORM=x11 node /tmp/backup-control-performance.mjs /tmp/backup-glass-surfaces-performance.json` | 大玻璃弹窗打开时，DPR=1 / DPR=2 的实际控件更新为 60.0 / 59.4 FPS，P95 帧间隔 17.4 / 18.4 ms；每帧只复制当前控件，动画结束后的 450 ms 观察期为 0 次控件绘制。DPR=1 的动画缓冲仍为 141×58 CSS 像素 |
+| 来源与格式 | 着色器与上游逐文件比较一致，新增输入框和弹窗来源已记录到 NOTICE 并同步到分发副本；涉及的自有 TS/TSX/CSS/MJS 通过 Prettier，`git diff --check` 通过 |
+
+完整桌面回归发现并修复两处画布边缘导致的横向溢出：目标表单增加边缘留白，弹窗的显示画布裁切到实际内容边界，不再把临时渲染余量计入滚动宽度。记录状态列加宽，避免“完成并有警告”末字单独换行。新建任务的内容区独立滚动，底部动作区保持可见。
+
+中间一轮在既有的“重载后失联状态”检查中出现一次 10 秒超时；业务轮询逻辑、等待时间和原断言均未调整，后续复测通过。该偶发超时原因尚未定位，不能将单次复测通过视为已修复。
+
+证据：`build/meson-logs/testlog.txt`、`tests/desktop_glass_fields.mjs`、`/tmp/backup-glass-surfaces-performance.json`；截图包括 `/tmp/backup-controls-dialog.png`、`/tmp/backup-controls-narrow.png`、`/tmp/backup-controls-dpr2.png`、`/tmp/backup-glass-targets-dpr2.png`。性能与截图来自本机隔离的 Xvfb / Openbox、SwiftShader 环境；未修改用户正在运行的窗口或备份数据。没有验收硬件 GPU、跨真实显示器切换、触摸屏及 Windows/macOS，帧率不代表其他机器的保证。
+
+## 2026-10-09 玻璃控件拖动性能
+
+执行者：Codex 自动化运行。环境为 Ubuntu 24.04 / WSL2、Electron 44.4.5、SwiftShader、隔离的 Xvfb / Openbox 60Hz 显示会话。保留上游着色器和按压/释放形变；改为共用控件尺寸的临时渲染缓冲，只重画并复制有变化的控件，其他显示画布保留原像素。拖动期间旋钮位置直接跟随指针，松手后的吸附和形变仍使用上游弹簧。
+
+在同一 1120×760 新建任务窗口、16 个已注册控件、相同循环拖动路径上比较。每个 DPR 连续拖动约 4.5 秒，绘制间隔统计排除前 0.5 秒；帧率来自被拖控件实际更新画布的时间戳，不是单独的 rAF 调用次数。
+
+| 指标 | 修改前 | 修改后 |
+| --- | --- | --- |
+| DPR=1 的实际绘制帧率 | 28.4 FPS | 60.0 FPS |
+| DPR=2 的实际绘制帧率 | 13.8 FPS | 60.0 FPS |
+| DPR=1 / DPR=2 的 P95 帧间隔 | 37.7 / 79.0 ms | 17.4 / 17.4 ms |
+| 拖动时每帧复制控件数 | 16 | 1 |
+| 拖动时每帧 WebGL 绘制调用 | 约 73 | 约 9 |
+| DPR=1 临时画布尺寸 | 512×226 | 141×58 |
+| 动画结束后的 450 ms 观察期 | 未测 | 0 次控件绘制 |
+
+| 验证 / 命令 | 实际结果 |
+| --- | --- |
+| `env DISPLAY=:89 BACKUP_ELECTRON_PLATFORM=x11 node /tmp/backup-control-performance.mjs /tmp/backup-glass-after.json` | 上表最终结果；修改前数据保存在 `/tmp/backup-glass-before.json`。未降低 DPR、关闭玻璃效果或更换渲染驱动 |
+| `tests/desktop_control_motion.mjs` | 通过真实 Chromium 鼠标事件快速反向拖动，已绘制旋钮位置与指针位移相符；拖动期间只有当前控件更新，其他控件保持原图像。由 `desktop_controls.mjs` 调用 |
+| `./scripts/build.sh` | 13 个 Meson 套件全部通过，0 失败、0 跳过；TypeScript 检查与 Vite 构建通过 |
+| `env DISPLAY=:89 BACKUP_ELECTRON_PLATFORM=x11 npm run test:window --prefix apps/backup-desktop` | 完整桌面回归通过，包括开关点击/键盘/拖动/禁用/图形恢复，以及扫描、备份、还原、多来源、特殊类型、历史、窗口恢复和关闭 |
+| Playwright 视觉及恢复检查 | 1120×760、850×600、DPR=2 截图复核通过；图形上下文替换、页面切换和表单状态保持通过。修复恢复后尺寸尚未就绪就开始绘制的问题，复测无 WebGL 绘制错误 |
+| 格式与来源 | 涉及的 TS/MJS 通过 Prettier 检查，`git diff --check` 通过；着色器与上游一致，NOTICE 已记录适配变化并同步到分发副本 |
+
+性能测试使用真实鼠标按下和 rAF 驱动的重复指针移动，减少 CDP 往返对采样的影响；真实输入功能检查另行执行。这里的 60 FPS 是本机隔离环境下的结果，不代表其他机器、硬件 GPU、真实显示器或触摸屏的性能承诺。测试未修改用户正在运行的应用或数据。
+
+## 2026-10-09 原版玻璃按钮与开关
+
+执行者：Codex 自动化运行。沿用下节所列上游提交的渲染器，新增原版 Settings Toggle 的轨道、旋钮和动画；页面、弹窗、标题栏按钮使用 Surface / Tinted Blue 参数，危险操作用红色。控件保留原生 DOM 点击、表单、禁用和键盘语义，共用一个离屏 WebGL 上下文。自有代码遵循 huawei-coding；上游代码保留原格式和许可。
+
+| 检查 / 命令 | 实际结果 |
+| --- | --- |
+| `./scripts/build.sh` | 13 个 Meson 套件全部通过，0 失败、0 跳过；TypeScript 检查与 Vite 构建通过，控件集成后无大包警告。后续前端调整由桌面启动脚本重新构建验证 |
+| `tests/desktop_controls.mjs` | 原版控件绘制、开关点击、空格键、按压像素变化、拖动单次提交及下次点击通过；fieldset 禁用和无来源时禁止创建保持有效。注入上下文丢失后控件仍可点击，画布恢复后表单状态和页面标记保留，共用渲染器数量仍为 1 |
+| `env DISPLAY=:89 BACKUP_ELECTRON_PLATFORM=x11 npm run test:window --prefix apps/backup-desktop` | 完整真实 Electron 回归通过：扫描、备份、还原、历史分页、失联恢复、特殊文件、单/多文件、类型筛选及 socket 路径；1120px/850px 表格和弹窗检查通过。5 次最大化/还原、最小化恢复、后台计时和关闭通过，无缺失 DRM 设备错误 |
+| `env DISPLAY=:89 BACKUP_ELECTRON_PLATFORM=x11 node /tmp/backup-control-check.mjs` | Playwright 连接真实 Electron，通过点击、键盘和拖动操作。1120×760、850×600、DPR=2 截图非空；DPR=2 的开关画布宽度为 176 像素。未发现页面异常、`GL_INVALID_OPERATION` 或纹理反馈循环错误 |
+| 布局复核 | 类型选择改为两列；窄窗口中新建任务内容独立滚动，标题、错误提示和确认按钮保持可见。记录表格及来源列表为玻璃按钮预留宽度，避免画布边缘造成横向溢出 |
+| 来源、格式 | 着色器目录与上游 `diff -qr` 一致；许可及 NOTICE 的分发副本一致。改动的自有 TS/TSX/CSS/MJS 通过 Prettier 检查，`git diff --check` 通过 |
+
+修复了开关动画暴露的上游 WebGL 采样器反馈循环：普通矩形和阴影着色器中未启用的 SDF 采样器绑定到占位纹理，不再误采样当前帧缓冲；同时释放该占位纹理。着色器源码未改动，适配记录已写入 NOTICE。
+
+回归发现并修复记录/来源操作列宽不足和窄窗口操作栏遮挡。测试的点击判断改为检查类名集合，保留真实输入验证；动态记录行加载及扫描后的异步连接检查等待实际完成状态，替代对中间状态的即时断言。
+
+截图：`/tmp/backup-controls-desktop.png`、`/tmp/backup-controls-dialog.png`、`/tmp/backup-controls-pressed.png`、`/tmp/backup-controls-narrow.png`、`/tmp/backup-controls-dpr2.png`。测试使用独立临时 Agent 配置，最终截图在隔离的 Xvfb / Openbox 显示会话运行，避免操作用户已有的窗口。DPR 由 CDP 模拟，覆盖后重新加载页面以保证画布获取新比例，未验收跨真实显示器切换或触摸屏；上下文恢复使用故障注入，不能代表真实 GPU 进程崩溃验收。白色页面按本地纯色背景渲染，观感与壁纸上的折射不同。
+
+## 2026-10-09 原版液态玻璃与软件 WebGL
+
+执行者：Codex 自动化运行。基于本工作区未提交版本，Ubuntu 24.04 / WSLg、Electron 44.4.5。侧栏直接集成 `martin65536/liquid-glass-webgl` 在 `0b90f9fc1cea8c7e59825f9aff1cbb96674b5b80` 的渲染器、着色器、Surface / Tinted Blue 按钮参数、背景图和弹簧动画。此实现替换了下方历史记录中的独立简化效果。主进程固定选择 SwiftShader，启动脚本不再传入 `--disable-gpu`。
+
+| 检查 / 命令 | 实际结果 |
+| --- | --- |
+| `./scripts/build.sh` | 13 个 Meson 套件通过；TypeScript 检查和 Vite 构建通过。玻璃模块延迟加载，主包和玻璃模块分别约 278 kB，无大包警告 |
+| `npm run test:window --prefix apps/backup-desktop` | 完整桌面回归通过，包括扫描、备份、还原、历史、类型筛选、多来源、850px 布局和 5 次最大化/还原。最小化恢复后 WebGL 仍可绘制 |
+| `tests/desktop_glass.mjs`，由上述桌面套件调用 | 确认 SwiftShader 驱动；前两次初始化失败后自动恢复；最终屏幕帧取样非空且不同位置颜色不同；按压触发多个动画帧，弹簧收敛后停止绘制；原上下文恢复和超时替换画布均通过，页面标记及当前标签保留 |
+| `node /tmp/backup-upstream-glass-check.mjs`，Playwright 连接真实 Electron CDP | 通过脚本启动 1 次、直接 `npm start` 启动 2 次，三次驱动均为 `ANGLE ... SwiftShader driver`；未出现自动回退弃用警告或缺少 DRM 设备错误。按压前后截图不同；键盘导航和减少动态效果设置下导航通过 |
+| Playwright 截图、窗口与分辨率检查 | 1120×760、850×600 和 DPR=2 画面非空，玻璃按钮、图标和文字无重叠，窄窗口无文档横向溢出。DPR=2 时画布内部宽度为 CSS 宽度的两倍 |
+| `diff -qr /tmp/liquid-glass-upstream/src/components/liquid-glass/shaders apps/backup-desktop/src/vendor/liquid-glass/shaders` | 所有着色器源码与上游完全一致。渲染器只包含 NOTICE 中列出的类型适配和资源释放修正 |
+| 自有代码 `npx prettier --check`、`bash -n scripts/run-agent.sh`、`git diff --check` | 均通过；上游源码保留原有格式 |
+
+截图保存在 `/tmp/backup-upstream-glass-desktop.png`、`/tmp/backup-upstream-glass-pressed.png`、`/tmp/backup-upstream-glass-switched.png`、`/tmp/backup-upstream-glass-narrow.png`、`/tmp/backup-upstream-glass-hidpi.png`。视觉检查使用独立的临时 Agent 配置；截图中的服务未连接属于该隔离环境，完整桌面套件另行启动 Server 验证真实备份和还原。
+
+验证边界：Electron CDP 在 CSS 尺寸不变时单独覆盖 DPR，不发送 `resize` 或分辨率媒体查询变更事件；因此 DPR=2 检查在覆盖后重新加载页面，不能视为跨真实显示器切换的验收。已测试 `WEBGL_lose_context` 注入的上下文丢失，未测试真实 GPU 进程崩溃、操作系统资源耗尽、Windows/macOS 或硬件 GPU 性能。确认空闲停止绘制不代表已测得 CPU 开销或帧率指标。
+
+## 2026-10-09 侧栏简化玻璃效果验证（历史，已替换）
+
+执行者：Codex 自动化运行。基于本工作区未提交版本，Ubuntu 24.04 / WSLg、Electron 44.4.5。实现为本项目独立编写的 WebGL 侧栏选中态效果，未复制 AGPL-3.0 上游项目源码。WebGL 画布不接收指针事件；上下文不可用时使用可移动的 CSS 玻璃选中态。
+
+| 检查 / 命令 | 实际结果 |
+| --- | --- |
+| `./scripts/build.sh` | 13 个 Meson 套件通过；TypeScript 检查和 Vite 构建通过 |
+| `npm run test:window --prefix apps/backup-desktop` | 真实 Electron 窗口回归通过；新增检查确认玻璃画布与 CSS 回退层均不拦截输入，回退选中态尺寸有效；其余扫描、备份、还原及窄窗口流程通过 |
+| Playwright 连接 Electron CDP，开启 SwiftShader 后截图与像素检查 | 1120×760、850×600 截图中侧栏高光可见，导航切换后高光从首项移到第二项；取样像素首项由 `[243,248,245]` 变为 `[235,241,237]`，第二项反向变化；850px 窗口文档宽度为 850px，无横向溢出。截图：`/tmp/backup-glass-playwright-desktop.png`、`/tmp/backup-glass-playwright-switched.png`、`/tmp/backup-glass-playwright-narrow.png` |
+| `npx prettier --check`、`git diff --check` | 均通过 |
+
+默认 WSLg 启动脚本使用 `--disable-gpu`，WebGL 不可用时使用 CSS 回退样式；单独开启 SwiftShader 可验证 WebGL 路径，但截图读取像素时 Chromium 报告 GPU stall 性能消息，因此不把该测试视为硬件 GPU 性能验收。未测 WebGL 上下文丢失时的系统级恢复、其他 Linux 显卡驱动或 Windows/macOS。
+
 原型阶段记录：自动化测试覆盖 TCP 消息拆包、合包、非法消息，C++ Agent 与 Server 连通、端口占用、服务端关闭后的连接失败、运行目录创建，以及真实目录扫描与 SHA-256 结果。Electron 前端执行 TypeScript 类型检查和 Vite 构建。手动验证已在 WSLg/X11 打开 Electron 窗口，通过预加载接口显示服务端已连接；关闭服务端后，重新检查显示连接失败。当时目录选择 GUI、备份与还原功能尚无自动化测试结果；后两项尚未实现。以下按日期保留历史结果，最新 P0 与 FR-10 结果见 2026-10-08 的记录。
 
 2026-09-26：修正 WSLg 无边框窗口的启动方式，默认使用原生 Wayland，并调整拖动区域与最大化状态同步。`npm run test:window --prefix apps/backup-desktop` 通过：5 次最大化/还原、11 次刷新点击、5 次目录选择入口调用，以及最小化、恢复、关闭。测试使用 Chromium 鼠标事件输入并检查真实 Electron 窗口状态；目录选择器被替换为取消结果，因此不覆盖原生文件对话框，也不覆盖 Windows 主机到 WSLg 的物理鼠标传递。

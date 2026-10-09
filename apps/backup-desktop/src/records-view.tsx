@@ -1,3 +1,4 @@
+import { GlassButton } from './glass-controls'
 import { ChevronDown, ChevronRight, Clock, RefreshCw } from 'lucide-react'
 import { Fragment, useEffect, useRef, useState } from 'react'
 import type { Operation } from './types'
@@ -58,12 +59,12 @@ function RecordCells({
                 <small>{formatBytes(record.bytes)}</small>
             </td>
             <td>
-                <button
+                <GlassButton
                     className="record-view"
                     onClick={() => void showRecord(record.id)}
                 >
                     查看
-                </button>
+                </GlassButton>
             </td>
         </>
     )
@@ -149,7 +150,7 @@ function RecordRow({
             >
                 <td className="record-toggle-cell">
                     {group && (
-                        <button
+                        <GlassButton
                             className="icon-button scan-group-toggle"
                             aria-label={
                                 expanded ? '收起扫描历史' : '展开扫描历史'
@@ -163,7 +164,7 @@ function RecordRow({
                             ) : (
                                 <ChevronRight size={16} />
                             )}
-                        </button>
+                        </GlassButton>
                     )}
                 </td>
                 <RecordCells
@@ -204,7 +205,7 @@ function RecordRow({
                                 读取扫描历史失败：{error}
                             </p>
                         )}
-                        <button
+                        <GlassButton
                             disabled={loading}
                             onClick={() => void load(nextOffset ?? 0)}
                         >
@@ -217,7 +218,7 @@ function RecordRow({
                                 : error
                                   ? '重试'
                                   : '加载更多扫描记录'}
-                        </button>
+                        </GlassButton>
                     </td>
                 </tr>
             )}
@@ -237,14 +238,14 @@ export function RecordsView({ model }: { model: ConsoleModel }) {
         <section>
             <div className="section-heading">
                 <span className="muted">{recordTotal} 条执行记录</span>
-                <button
+                <GlassButton
                     className="records-refresh"
                     disabled={recordsLoading}
                     onClick={() => void loadRecords()}
                 >
                     <RefreshCw size={16} />
                     {recordsLoading ? '加载中' : '刷新'}
-                </button>
+                </GlassButton>
             </div>
             {records.length === 0 && (
                 <div className="empty-state">
@@ -279,12 +280,12 @@ export function RecordsView({ model }: { model: ConsoleModel }) {
                 </table>
             </div>
             {recordNextOffset !== null && (
-                <button
+                <GlassButton
                     disabled={recordsLoading}
                     onClick={() => void loadRecords(recordNextOffset)}
                 >
                     加载更多
-                </button>
+                </GlassButton>
             )}
         </section>
     )

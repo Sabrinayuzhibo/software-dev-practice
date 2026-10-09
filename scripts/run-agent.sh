@@ -34,7 +34,9 @@ if [[ -n "${WSL_DISTRO_NAME:-}" ]]; then
         wayland|x11) ;;
         *) echo 'BACKUP_ELECTRON_PLATFORM 必须是 wayland 或 x11' >&2; exit 2 ;;
     esac
-    electron_options+=("--ozone-platform=$electron_platform" --disable-gpu)
+    # The main process selects SwiftShader; disabling GPU here also disables
+    # Chromium paths needed by the WebGL sidebar.
+    electron_options+=("--ozone-platform=$electron_platform")
     if [[ "$electron_platform" == wayland ]] &&
        ! compgen -G '/dev/dri/renderD*' > /dev/null; then
         # WSLg may expose only /dev/dxg. An empty Chromium render-node override

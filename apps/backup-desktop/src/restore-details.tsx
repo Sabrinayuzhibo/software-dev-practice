@@ -1,3 +1,4 @@
+import { GlassButton } from './glass-controls'
 import { useEffect, useRef, useState } from 'react'
 import { RefreshCw } from 'lucide-react'
 import type { RestorePage } from './types'
@@ -85,7 +86,7 @@ export function RestoreDetails({ operationId }: { operationId: string }) {
                 </p>
             )}
             {(!page || page.next_offset !== null) && (
-                <button
+                <GlassButton
                     disabled={loading}
                     onClick={() => void load(page?.next_offset || 0)}
                 >
@@ -94,7 +95,7 @@ export function RestoreDetails({ operationId }: { operationId: string }) {
                         className={loading ? 'spinning' : ''}
                     />
                     {loading ? '加载中' : error ? '重试' : '加载更多'}
-                </button>
+                </GlassButton>
             )}
         </details>
     )

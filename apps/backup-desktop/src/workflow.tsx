@@ -1,3 +1,6 @@
+import { GlassButton } from './glass-controls'
+import { GlassInput } from './glass-fields'
+import { useGlassSurface } from './use-glass-surface'
 import {
     Archive,
     ArrowDownToLine,
@@ -33,6 +36,7 @@ export function Dialog({
     children: ReactNode
 }) {
     const ref = useRef<HTMLDialogElement>(null)
+    const surface = useGlassSurface({ kind: 'sheet' })
     useEffect(() => {
         const dialog = ref.current!
         dialog.showModal()
@@ -41,25 +45,32 @@ export function Dialog({
     return (
         <dialog
             ref={ref}
-            className="workflow-dialog"
+            className="workflow-dialog glass-sheet"
             aria-labelledby="dialog-title"
             onCancel={(event) => {
                 event.preventDefault()
                 onClose()
             }}
         >
-            <div className="section-heading">
-                <h2 id="dialog-title">{title}</h2>
-                <button
-                    className="icon-button"
-                    aria-label="关闭对话框"
-                    title="关闭"
-                    onClick={onClose}
-                >
-                    <X size={18} />
-                </button>
+            <canvas
+                ref={surface}
+                className="glass-surface"
+                aria-hidden="true"
+            />
+            <div className="workflow-dialog-content">
+                <div className="section-heading">
+                    <h2 id="dialog-title">{title}</h2>
+                    <GlassButton
+                        className="icon-button"
+                        aria-label="关闭对话框"
+                        title="关闭"
+                        onClick={onClose}
+                    >
+                        <X size={18} />
+                    </GlassButton>
+                </div>
+                {children}
             </div>
-            {children}
         </dialog>
     )
 }
@@ -91,20 +102,20 @@ export function WorkflowDialogs({ model }: { model: ConsoleModel }) {
                     />
                     <p>只移除任务配置，源文件和已完成的备份版本都会保留。</p>
                     <div className="dialog-actions">
-                        <button
+                        <GlassButton
                             autoFocus
                             onClick={() => model.setRemoveCandidate(null)}
                         >
                             取消
-                        </button>
-                        <button
+                        </GlassButton>
+                        <GlassButton
                             className="danger-button"
                             disabled={busy}
                             onClick={() => void model.removeTask()}
                         >
                             <Trash2 size={16} />
                             移除任务
-                        </button>
+                        </GlassButton>
                     </div>
                 </Dialog>
             )}
@@ -152,13 +163,13 @@ export function WorkflowDialogs({ model }: { model: ConsoleModel }) {
                     <label className="restore-location">
                         还原到
                         <div className="directory-input">
-                            <input
+                            <GlassInput
                                 readOnly
                                 value={restoreDestination}
                                 placeholder="选择新建或空目录"
                                 aria-label="还原目录"
                             />
-                            <button
+                            <GlassButton
                                 title="选择还原目录"
                                 aria-label="选择还原目录"
                                 disabled={busy}
@@ -167,7 +178,7 @@ export function WorkflowDialogs({ model }: { model: ConsoleModel }) {
                                 }
                             >
                                 <FolderOpen size={18} />
-                            </button>
+                            </GlassButton>
                         </div>
                     </label>
                     <p className="muted">
@@ -179,20 +190,20 @@ export function WorkflowDialogs({ model }: { model: ConsoleModel }) {
                         </p>
                     )}
                     <div className="dialog-actions">
-                        <button
+                        <GlassButton
                             autoFocus
                             onClick={() => model.setRestoreCandidate(null)}
                         >
                             取消
-                        </button>
-                        <button
+                        </GlassButton>
+                        <GlassButton
                             className="backup-button confirm-restore"
                             disabled={busy || !restoreDestination}
                             onClick={() => void model.restore()}
                         >
                             <ArrowDownToLine size={16} />
                             开始还原
-                        </button>
+                        </GlassButton>
                     </div>
                 </Dialog>
             )}
@@ -233,14 +244,14 @@ export function OperationPanel({
                         {detail.files} 个文件 · {formatBytes(detail.bytes)}
                     </span>
                     {(!running || model.tab === 'records') && (
-                        <button
+                        <GlassButton
                             className="icon-button"
                             aria-label="收起执行结果"
                             title="收起执行结果"
                             onClick={() => model.closeDetail(detail)}
                         >
                             <X size={16} />
-                        </button>
+                        </GlassButton>
                     )}
                 </div>
             </div>
@@ -273,7 +284,7 @@ export function OperationPanel({
             {detail.error && <p className="error-text">{detail.error}</p>}
             <div className="result-actions">
                 {succeeded && detail.action === 'backup' && (
-                    <button
+                    <GlassButton
                         className="view-versions"
                         onClick={() =>
                             model.viewVersions(
@@ -285,16 +296,16 @@ export function OperationPanel({
                     >
                         <Archive size={16} />
                         查看备份版本
-                    </button>
+                    </GlassButton>
                 )}
                 {detail.state === 'WAITING' && (
-                    <button
+                    <GlassButton
                         disabled={busy}
                         onClick={() => void model.confirmOperation(detail)}
                     >
                         <RefreshCw size={16} />
                         确认提交结果
-                    </button>
+                    </GlassButton>
                 )}
                 <details className="operation-details">
                     <summary>执行详情</summary>

@@ -13,4 +13,7 @@ QJsonObject backup(const QJsonObject& task, const QJsonObject& target,
 QJsonObject restore(const QJsonObject& args, const QJsonObject& target,
                     const QJsonArray& tasks, const QJsonArray& targets,
                     const QString& stateDirectory, const Progress& progress);
+// Delete only the selected version; uncertain transport outcomes are retryable.
+QJsonObject deleteVersion(const QJsonObject& args, const QJsonObject& target,
+                          const Progress& progress);
 } // namespace backup::agent

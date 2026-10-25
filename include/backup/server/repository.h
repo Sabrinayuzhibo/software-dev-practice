@@ -6,6 +6,7 @@
 
 #include <QCryptographicHash>
 #include <QFile>
+#include <QHash>
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QLockFile>
@@ -27,6 +28,13 @@ class Repository
     QJsonObject entries(const QJsonObject& request) const;
     QJsonObject download(const QJsonObject& request) const;
 
+    // Hold versions for a reader connection until it disconnects.
+    void acquireVersion(const QString& id);
+    void releaseVersion(const QString& id);
+    // Atomically hide a version, then reclaim one bounded batch. Idempotent
+    // across retries/restarts; done is true only after durable completion.
+    QJsonObject deleteVersion(const QString& id);
+
     // Exactly one connection owns an upload until commit or disconnect.
     QJsonObject begin(const QJsonObject& request);
     void addEntry(const QJsonObject& entry);
@@ -43,6 +51,7 @@ class Repository
     QString token_;
     QString activeId_;
     QString stagingPath_;
+    QHash<QString, int> readers_;
     QJsonObject summary_;
     QJsonObject currentEntry_;
     core::Manifest entries_;

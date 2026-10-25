@@ -16,6 +16,7 @@ struct Session
     protocol::FrameDecoder decoder;
     bool authenticated = false;
     bool uploading = false;
+    QSet<QString> reading;
 };
 } // namespace
 
@@ -75,7 +76,8 @@ BackupServer::BackupServer(QObject* parent) : QObject(parent)
                                             session->authenticated,
                                             "Authentication required");
                                         response.payload = handleRequest(
-                                            action, args, &session->uploading);
+                                            action, args, &session->uploading,
+                                            &session->reading);
                                     }
                                 }
                                 catch (const std::exception& failure)
@@ -108,6 +110,10 @@ BackupServer::BackupServer(QObject* parent) : QObject(parent)
                             {
                                 repository_.abort();
                             }
+                            for (const auto& id : session->reading)
+                            {
+                                repository_.releaseVersion(id);
+                            }
                             socket->deleteLater();
                         });
             }
@@ -116,8 +122,22 @@ BackupServer::BackupServer(QObject* parent) : QObject(parent)
 
 QJsonObject BackupServer::handleRequest(const QString& action,
                                         const QJsonObject& args,
-                                        bool* uploading)
+                                        bool* uploading, QSet<QString>* reading)
 {
+    if (action == "version" || action == "version_warnings" ||
+        action == "entries" || action == "download")
+    {
+        const auto id = core::text(args, "version_id");
+        if (!reading->contains(id))
+        {
+            repository_.acquireVersion(id);
+            reading->insert(id);
+        }
+    }
+    if (action == "delete_version")
+    {
+        return repository_.deleteVersion(core::text(args, "version_id"));
+    }
     if (action == "health")
     {
         return repository_.health();

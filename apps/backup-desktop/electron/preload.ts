@@ -43,6 +43,19 @@ contextBridge.exposeInMainWorld('backup', {
     backupTask: (id: string) => ipcRenderer.invoke('tasks:backup', id),
     listVersions: (targetId: string, offset = 0, taskId = '') =>
         ipcRenderer.invoke('versions:list', targetId, offset, taskId),
+    deleteVersion: (
+        targetId: string,
+        versionId: string,
+        repositoryPath: string,
+    ) =>
+        ipcRenderer.invoke(
+            'versions:delete',
+            targetId,
+            versionId,
+            repositoryPath,
+        ),
+    retryVersionDeletion: (id: string) =>
+        ipcRenderer.invoke('operations:retry-delete', id),
     getVersionWarnings: (targetId: string, versionId: string, offset = 0) =>
         ipcRenderer.invoke('versions:warnings', targetId, versionId, offset),
     chooseRestoreDirectory: () =>

@@ -6,6 +6,7 @@ import type {
     Operation,
     Target,
     Version,
+    VersionDeletion,
 } from './types'
 
 const maxStatusFailures = 3
@@ -68,6 +69,9 @@ export function useBackupConsole() {
         null,
     )
     const [restoreDestination, setRestoreDestination] = useState('')
+    const [deleteCandidate, setDeleteCandidate] =
+        useState<VersionDeletion | null>(null)
+    const deletionStarting = useRef(false)
     const connectionRequest = useRef(0)
     const versionRequest = useRef(0)
     const recordsRequest = useRef(0)
@@ -98,6 +102,7 @@ export function useBackupConsole() {
         setVersionsLoading(false)
         setVersionTaskId('')
         setDetail(null)
+        setDeleteCandidate(null)
         clearRecordDetail()
     }
 
@@ -233,7 +238,10 @@ export function useBackupConsole() {
                 }
                 setActiveId(running.id)
                 setDetail(running)
-                if (running.task_id) {
+                if (
+                    running.task_id &&
+                    ['scan', 'backup'].includes(running.action)
+                ) {
                     const update =
                         running.action === 'scan' ? setScans : setBackups
                     update((old) => ({ ...old, [running.task_id!]: running }))
@@ -310,6 +318,14 @@ export function useBackupConsole() {
                     return
                 }
                 setActiveId(null)
+                if (
+                    operation.action === 'delete_version' &&
+                    operation.state === 'SUCCEEDED'
+                ) {
+                    setVersions((old) =>
+                        old.filter((item) => item.id !== operation.version_id),
+                    )
+                }
                 if (
                     operation.action === 'backup' &&
                     operation.state.startsWith('SUCCEEDED') &&
@@ -410,7 +426,7 @@ export function useBackupConsole() {
             | 'file_types'
             | 'preserve_empty_dirs'
             | 'source_name'
-        >,
+        > & { version_id?: string; target?: Target },
     ) {
         setMessage('')
         setStarting(label)
@@ -424,13 +440,16 @@ export function useBackupConsole() {
                     state: 'RUNNING',
                     stage: 'prepare',
                     started_at: new Date().toISOString(),
-                    target: target!,
+                    target: context.target ?? target!,
                     files: 0,
                     bytes: 0,
                     warning_count: 0,
                 }
                 setDetail(pending)
-                if (pending.task_id) {
+                if (
+                    pending.task_id &&
+                    ['scan', 'backup'].includes(pending.action)
+                ) {
                     const update =
                         pending.action === 'scan' ? setScans : setBackups
                     update((old) => ({ ...old, [pending.task_id!]: pending }))
@@ -441,12 +460,17 @@ export function useBackupConsole() {
                     error: '',
                 })
                 setActiveId(result.operation_id)
+                if (pending.action === 'delete_version' && tab === 'records') {
+                    setRecordDetail(pending)
+                }
+                return true
             }
         } catch (error) {
             setMessage(String(error))
         } finally {
             setStarting('')
         }
+        return false
     }
 
     async function createTask(
@@ -587,6 +611,70 @@ export function useBackupConsole() {
         setRestoreCandidate(version)
     }
 
+    function requestDelete(version: Version) {
+        if (busy || !target || !connection.root) {
+            return
+        }
+        setMessage('')
+        setDeleteCandidate({ version, target, repositoryPath: connection.root })
+    }
+
+    function requestDeleteRetry(operation: Operation) {
+        if (busy || !operation.version_id) {
+            return
+        }
+        setMessage('')
+        setDeleteCandidate({
+            version: {
+                id: operation.version_id,
+                source: operation.source,
+                source_name: operation.source_name,
+                selection: operation.selection,
+            },
+            target: operation.target,
+            repositoryPath:
+                operation.target.repository_path ||
+                operation.target.data_root ||
+                '',
+            retryOperationId: operation.id,
+        })
+    }
+
+    async function deleteVersion() {
+        if (!deleteCandidate || busy || deletionStarting.current) {
+            return
+        }
+        deletionStarting.current = true
+        try {
+            const candidate = deleteCandidate
+            const started = await run(
+                () =>
+                    candidate.retryOperationId
+                        ? window.backup.retryVersionDeletion(
+                              candidate.retryOperationId,
+                          )
+                        : window.backup.deleteVersion(
+                              candidate.target.id,
+                              candidate.version.id,
+                              candidate.repositoryPath,
+                          ),
+                '正在准备删除版本',
+                {
+                    action: 'delete_version',
+                    version_id: candidate.version.id,
+                    target: candidate.target,
+                    source: candidate.version.source,
+                    source_name: candidate.version.source_name,
+                },
+            )
+            if (started) {
+                setDeleteCandidate(null)
+            }
+        } finally {
+            deletionStarting.current = false
+        }
+    }
+
     async function restore() {
         if (!restoreCandidate || !restoreDestination) {
             return
@@ -707,6 +795,11 @@ export function useBackupConsole() {
         chooseRestoreDirectory,
         requestRestore,
         restore,
+        deleteCandidate,
+        setDeleteCandidate,
+        requestDelete,
+        requestDeleteRetry,
+        deleteVersion,
         confirmOperation,
     }
 }

@@ -206,6 +206,7 @@ QJsonObject SourceEntries::process(const QString& path, const struct stat& info,
         return regular(path, info, status);
     }
     QJsonObject entry{{"path", path}, {"type", type}};
+    require(type != "socket", "Socket node backups are no longer supported");
     if (type == "directory" || type == "symlink" || type == "fifo")
     {
         addMetadata(entry, info);
@@ -246,12 +247,11 @@ QJsonObject SourceEntries::process(const QString& path, const struct stat& info,
     {
         channel_->call("entry", entry);
     }
-    const auto counter = type == "directory"        ? "directories"
-                         : type == "symlink"        ? "symlinks"
-                         : type == "fifo"           ? "fifos"
+    const auto counter = type == "directory"          ? "directories"
+                         : type == "symlink"          ? "symlinks"
+                         : type == "fifo"             ? "fifos"
                          : type == "character_device" ? "character_devices"
-                         : type == "block_device"   ? "block_devices"
-                                                     : "sockets";
+                                                      : "block_devices";
     increment(status, counter);
     snapshots_.insert(path, info);
     if (structural)
@@ -313,6 +313,9 @@ QJsonObject sourceTree(const QJsonObject& source, Channel* channel,
                        const Progress& progress)
 {
     const SourceScope scope(source);
+    require(!scope.fileTypes().contains("socket"),
+            "Socket node backups are no longer supported; create a task "
+            "without the socket type");
     const auto rootPath = canonicalPath(scope.root());
     require(rootPath == scope.root(),
             "Source root has changed: " + scope.root());
@@ -414,14 +417,18 @@ QJsonObject sourceTree(const QJsonObject& source, Channel* channel,
             if ((type == "character_device" || type == "block_device" ||
                  type == "socket") &&
                 !scope.includes(type) &&
-                (scope.fileTypes().isEmpty() ||
+                (type == "socket" || scope.fileTypes().isEmpty() ||
                  scope.hasEmptyDirectoryRule()))
             {
+                const auto reason =
+                    type == "socket"
+                        ? "Socket node skipped; backing up socket nodes is "
+                          "not supported"
+                        : type + " node skipped; select this type to back it "
+                                 "up";
                 QJsonObject skipped{{"path", path},
                                     {"type", type},
-                                    {"reason", type +
-                                                   " node skipped; select this "
-                                                   "type to back it up"}};
+                                    {"reason", reason}};
                 addSample(sample, skipped);
                 warnings.append(skipped);
                 processed.insert(path);

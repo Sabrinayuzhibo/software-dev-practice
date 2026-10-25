@@ -49,7 +49,7 @@ QString selectedType(const QString& path)
     }
     if (S_ISSOCK(info.st_mode))
     {
-        return "socket";
+        throw Error("Socket nodes cannot be selected for backup: " + path);
     }
     throw Error("Unsupported source type: " + path);
 }
@@ -71,6 +71,8 @@ QJsonObject prepareSources(const QJsonArray& paths,
         filterSpecification.insert("preserve_empty_dirs", preserveEmptyDirs);
     }
     const SourceScope filter(filterSpecification);
+    require(!filter.fileTypes().contains("socket"),
+            "Socket node backups are no longer supported");
     QMap<QString, QString> selected;
     for (const auto& value : paths)
     {

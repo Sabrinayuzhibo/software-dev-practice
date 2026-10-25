@@ -24,6 +24,7 @@ export const actionLabels: Record<string, string> = {
     scan: '扫描',
     backup: '备份',
     restore: '还原',
+    delete_version: '删除版本',
 }
 export const stageLabels: Record<string, string> = {
     prepare: '准备',
@@ -33,6 +34,20 @@ export const stageLabels: Record<string, string> = {
     restore: '还原',
     commit: '保存版本',
     confirm: '确认结果',
+    delete: '删除版本',
+}
+
+export function deletionError(error: string): string {
+    if (error.includes('Version is in use')) {
+        return '该版本正在被读取或还原，请等待完成后重试删除。'
+    }
+    if (
+        error.includes('DELETE_UNCERTAIN') ||
+        error.includes('Deletion may be incomplete')
+    ) {
+        return `删除结果尚未确认，可重试删除以继续处理。${error}`
+    }
+    return error
 }
 
 export const entryTypeLabels: Record<string, string> = {

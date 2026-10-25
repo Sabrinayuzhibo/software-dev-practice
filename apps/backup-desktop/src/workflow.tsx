@@ -1,6 +1,5 @@
 import { GlassButton } from './glass-controls'
 import { GlassInput } from './glass-fields'
-import { useGlassSurface } from './use-glass-surface'
 import {
     Archive,
     ArrowDownToLine,
@@ -24,39 +23,39 @@ import {
     stageLabels,
     stateLabels,
     specialEntryCounts,
+    deletionError,
 } from './ui'
 
 export function Dialog({
     title,
     onClose,
     children,
+    initialFocus,
 }: {
     title: string
     onClose: () => void
     children: ReactNode
+    initialFocus?: string
 }) {
     const ref = useRef<HTMLDialogElement>(null)
-    const surface = useGlassSurface({ kind: 'sheet' })
     useEffect(() => {
         const dialog = ref.current!
         dialog.showModal()
+        if (initialFocus) {
+            dialog.querySelector<HTMLElement>(initialFocus)?.focus()
+        }
         return () => dialog.close()
-    }, [])
+    }, [initialFocus])
     return (
         <dialog
             ref={ref}
-            className="workflow-dialog glass-sheet"
+            className="workflow-dialog"
             aria-labelledby="dialog-title"
             onCancel={(event) => {
                 event.preventDefault()
                 onClose()
             }}
         >
-            <canvas
-                ref={surface}
-                className="glass-surface"
-                aria-hidden="true"
-            />
             <div className="workflow-dialog-content">
                 <div className="section-heading">
                     <h2 id="dialog-title">{title}</h2>
@@ -281,7 +280,19 @@ export function OperationPanel({
             {running && detail.path && (
                 <small className="path">{detail.path}</small>
             )}
-            {detail.error && <p className="error-text">{detail.error}</p>}
+            {detail.version_id && (
+                <p className="path">版本编号：{detail.version_id}</p>
+            )}
+            {detail.error && (
+                <p className="error-text">
+                    {detail.action === 'delete_version'
+                        ? deletionError(detail.error)
+                        : detail.error}
+                </p>
+            )}
+            {succeeded && detail.action === 'delete_version' && (
+                <p role="status">所选版本已删除。</p>
+            )}
             <div className="result-actions">
                 {succeeded && detail.action === 'backup' && (
                     <GlassButton
@@ -298,7 +309,7 @@ export function OperationPanel({
                         查看备份版本
                     </GlassButton>
                 )}
-                {detail.state === 'WAITING' && (
+                {detail.state === 'WAITING' && detail.action === 'backup' && (
                     <GlassButton
                         disabled={busy}
                         onClick={() => void model.confirmOperation(detail)}
@@ -307,6 +318,19 @@ export function OperationPanel({
                         确认提交结果
                     </GlassButton>
                 )}
+                {detail.action === 'delete_version' &&
+                    ['WAITING', 'FAILED', 'INTERRUPTED'].includes(
+                        detail.state,
+                    ) && (
+                        <GlassButton
+                            className="retry-delete-version"
+                            disabled={busy}
+                            onClick={() => model.requestDeleteRetry(detail)}
+                        >
+                            <RefreshCw size={16} />
+                            重试删除
+                        </GlassButton>
+                    )}
                 <details className="operation-details">
                     <summary>执行详情</summary>
                     <small>执行编号：{detail.id}</small>

@@ -4,7 +4,6 @@ import {
 } from './vendor/liquid-glass/catalog/helpers-elements'
 import { makeSettingsToggle } from './vendor/liquid-glass/catalog/helpers-settings-toggle'
 import { makeTextInputGlass } from './vendor/liquid-glass/catalog/helpers-text-input'
-import { makeDialogGlass } from './vendor/liquid-glass/catalog/helpers-dialog'
 import { LIGHT_PALETTE } from './vendor/liquid-glass/catalog/palettes'
 import type {
     GlassElementConfig,
@@ -50,15 +49,12 @@ function controlElements(entry: ControlEntry): GlassElementConfig[] {
             w: rect.w + kControlPadding * 2,
             h: rect.h + kControlPadding * 2,
         },
-        options.kind === 'sheet' ? LIGHT_PALETTE.dialogDim : color,
+        color,
         0,
         false,
     )
     if (options.kind === 'field') {
         return [backdrop, makeTextInputGlass(entry.id, rect)]
-    }
-    if (options.kind === 'sheet') {
-        return [backdrop, makeDialogGlass(entry.id, rect)]
     }
     if (options.kind === 'switch') {
         return [
@@ -116,14 +112,8 @@ export function layoutControls(
     for (const entry of visible) {
         const bounds = entry.host.getBoundingClientRect()
         const options = entry.options()
-        const w =
-            options.kind === 'sheet'
-                ? entry.host.clientWidth
-                : Math.ceil(bounds.width)
-        const h =
-            options.kind === 'sheet'
-                ? entry.host.clientHeight
-                : Math.ceil(bounds.height)
+        const w = Math.ceil(bounds.width)
+        const h = Math.ceil(bounds.height)
         entry.rect = {
             x: kControlPadding,
             y: kControlPadding,
@@ -163,9 +153,7 @@ export function copyControlFrame(
     if (!entry.visible || !w || !h) {
         return
     }
-    // Dialogs have a DOM shadow and never deform. Crop their scratch margin
-    // so the display canvas does not enlarge the modal's scrollable bounds.
-    const padding = entry.options().kind === 'sheet' ? 0 : kControlPadding
+    const padding = kControlPadding
     const width = Math.round((w + padding * 2) * renderer.dpr)
     const height = Math.round((h + padding * 2) * renderer.dpr)
     if (entry.canvas.width !== width || entry.canvas.height !== height) {

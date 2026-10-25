@@ -4,11 +4,7 @@ import { useState } from 'react'
 import type { ContentFileType, FileType } from './types'
 
 export const defaultFileTypes: ContentFileType[] = ['file', 'symlink', 'fifo']
-const specialFileTypes: ContentFileType[] = [
-    'character_device',
-    'block_device',
-    'socket',
-]
+const specialFileTypes: ContentFileType[] = ['character_device', 'block_device']
 export const supportedFileTypes: ContentFileType[] = [
     ...defaultFileTypes,
     ...specialFileTypes,
@@ -29,7 +25,6 @@ const hints: Partial<Record<ContentFileType, string>> = {
     character_device: '只保存设备类型和主/次设备号；还原需要创建节点权限',
     block_device:
         '只保存设备类型和主/次设备号，不读取磁盘内容；还原需要创建节点权限',
-    socket: '只保存路径节点，不保存连接和服务状态',
 }
 
 export function FileTypePicker({
@@ -103,7 +98,7 @@ export function FileTypePicker({
                     ) : (
                         <ChevronDown size={15} />
                     )}
-                    设备与套接字
+                    设备节点
                 </GlassButton>
             </div>
             {specialExpanded && (

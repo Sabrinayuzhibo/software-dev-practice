@@ -1,5 +1,4 @@
 import { GlassButton } from './glass-controls'
-import { GlassInput, GlassSelect } from './glass-fields'
 import {
     FilePlus,
     FolderPlus,
@@ -34,6 +33,8 @@ function sourceError(failure: unknown): string {
             '同一仓库的其他目标下已存在相同范围的任务。',
         'Selected source does not match file type filter: ':
             '所选文件的类型不在当前筛选范围内：',
+        'Socket nodes cannot be selected for backup: ':
+            '不支持备份套接字节点：',
     }
     for (const [prefix, translated] of Object.entries(translations)) {
         if (message.startsWith(prefix)) {
@@ -239,7 +240,7 @@ export function CreateTaskDialog({
                 >
                     <label>
                         任务名称
-                        <GlassInput
+                        <input
                             aria-label="任务名称"
                             maxLength={120}
                             value={name}
@@ -254,7 +255,7 @@ export function CreateTaskDialog({
                     </label>
                     <label>
                         备份目标
-                        <GlassSelect
+                        <select
                             aria-label="新任务备份目标"
                             value={targetId}
                             disabled={disabled}
@@ -268,7 +269,7 @@ export function CreateTaskDialog({
                                     {target.name}
                                 </option>
                             ))}
-                        </GlassSelect>
+                        </select>
                     </label>
                 </form>
                 <FileTypePicker
@@ -319,9 +320,9 @@ export function CreateTaskDialog({
                 </div>
                 {showManualPath && (
                     <div className="source-path-input">
-                        <GlassInput
+                        <input
                             aria-label="特殊节点绝对路径"
-                            placeholder="设备或套接字绝对路径"
+                            placeholder="设备节点绝对路径"
                             value={manualPath}
                             disabled={disabled}
                             onChange={(event) =>

@@ -108,7 +108,6 @@ function registerHandlers(): void {
             'fifo',
             'character_device',
             'block_device',
-            'socket',
         ]
         if (
             !Array.isArray(paths) ||
@@ -193,6 +192,37 @@ function registerHandlers(): void {
             return null
         }
         return selection.filePaths[0]
+    })
+    ipcMain.handle(
+        'versions:delete',
+        (
+            _event,
+            targetId: unknown,
+            versionId: unknown,
+            repositoryPath: unknown,
+        ) => {
+            if (
+                typeof targetId !== 'string' ||
+                !targetId ||
+                typeof versionId !== 'string' ||
+                !/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,79}$/.test(versionId) ||
+                typeof repositoryPath !== 'string' ||
+                !repositoryPath
+            ) {
+                throw new Error('请重新选择要删除的备份版本')
+            }
+            return bridge.send('start_delete_version', {
+                target_id: targetId,
+                version_id: versionId,
+                repository_path: repositoryPath,
+            })
+        },
+    )
+    ipcMain.handle('operations:retry-delete', (_event, id: unknown) => {
+        if (typeof id !== 'string' || !id) {
+            throw new Error('缺少删除执行记录')
+        }
+        return bridge.send('start_delete_version', { retry_operation_id: id })
     })
     ipcMain.handle(
         'versions:warnings',

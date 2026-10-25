@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 
-/** Exercise native typing and modal behavior while static glass is replaced. */
+/** Ordinary dialogs stay editable while the surrounding glass recovers. */
 export async function checkGlassFields({ page, click, until }) {
     const typography = await page.evaluate(`(async () => {
         const loaded = await document.fonts.load(
@@ -34,24 +34,22 @@ export async function checkGlassFields({ page, click, until }) {
     await until(
         () =>
             page.evaluate(`(() => {
-            const field = document.querySelector('${input}')?.closest('.glass-field');
-            return field?.dataset.glassState === 'active' &&
-                document.querySelector('dialog')?.dataset.glassState === 'active';
+            const dialog = document.querySelector('dialog');
+            return dialog?.open && document.querySelector('${input}') &&
+                document.querySelector('.field-glass-source')?.dataset.glassState === 'active';
         })()`),
-        'glass fields and dialog',
+        'plain dialog and surrounding glass fields',
     )
-    const pixels = await page.evaluate(`(() => {
-        const canvas = document.querySelector('dialog > canvas');
-        const context = canvas.getContext('2d');
-        const x = Math.floor(canvas.width / 2);
-        const y = Math.floor(canvas.height / 2);
-        return [
-            [...context.getImageData(x, y, 1, 1).data],
-            [...context.getImageData(0, 0, 1, 1).data],
-        ];
-    })()`)
-    assert.equal(pixels[0][3], 255, 'dialog material is painted')
-    assert.equal(pixels[1][3], 0, 'dialog keeps transparent rounded corners')
+    assert(
+        await page.evaluate(`(() => {
+        const dialog = document.querySelector('dialog');
+        return getComputedStyle(dialog).backgroundColor === 'rgb(255, 255, 255)' &&
+            !dialog.querySelector(':scope > canvas') &&
+            !document.querySelector('.sheet-glass-source') &&
+            !!dialog.querySelector('button canvas.glass-surface');
+    })()`),
+        'dialog is opaque and its buttons keep glass',
+    )
     assert.equal(
         await page.evaluate('controlErrorQueries'),
         0,
@@ -64,46 +62,41 @@ export async function checkGlassFields({ page, click, until }) {
         '玻璃输入检查',
     )
 
-    // Replacing either static context must not remount the form or the live
-    // toggle renderer. Native input also stays usable during the fallback.
+    // Replacing the surrounding field context does not remount the form or
+    // the toggle renderer. Native input stays usable during the fallback.
     await page.evaluate(`
         globalThis.previousFieldCanvas = document.querySelector('.field-glass-source');
-        globalThis.previousSheetCanvas = document.querySelector('.sheet-glass-source');
         globalThis.previousAnimatedCanvas = document.querySelector('.control-glass-source');
-        for (const canvas of [previousFieldCanvas, previousSheetCanvas]) {
-            canvas.getContext('webgl').getExtension('WEBGL_lose_context').loseContext();
-        }
+        previousFieldCanvas.getContext('webgl').getExtension('WEBGL_lose_context').loseContext();
     `)
     await until(
         () =>
             page.evaluate(
-                `document.querySelector('dialog').dataset.glassState === 'fallback'`,
+                `document.querySelector('.glass-field')?.dataset.glassState === 'fallback'`,
             ),
-        'dialog fallback',
+        'field fallback',
     )
     assert.equal(
         await page.evaluate(
             `getComputedStyle(document.querySelector('dialog')).backgroundColor`,
         ),
-        'rgba(226, 240, 249, 0.87)',
-        'fallback keeps a tinted glass appearance',
+        'rgb(255, 255, 255)',
+        'dialog remains solid during surrounding recovery',
     )
     await page.call('Input.insertText', { text: '继续编辑' })
     await until(
         () =>
             page.evaluate(`(() => {
             const field = document.querySelector('.field-glass-source');
-            const sheet = document.querySelector('.sheet-glass-source');
-            return field !== previousFieldCanvas && sheet !== previousSheetCanvas &&
-                field?.dataset.glassState === 'active' &&
-                sheet?.dataset.glassState === 'active';
+            return field !== previousFieldCanvas &&
+                field?.dataset.glassState === 'active';
         })()`),
         'static glass recovery',
     )
     assert.equal(
         await page.evaluate(`document.querySelector('${input}').value`),
         '玻璃输入检查继续编辑',
-        'native form state survives both context replacements',
+        'native form state survives field context replacement',
     )
     assert.equal(
         await page.evaluate(
@@ -140,10 +133,7 @@ export async function checkGlassFields({ page, click, until }) {
     )
     await click('.primary-button')
     await until(
-        () =>
-            page.evaluate(
-                `document.querySelector('dialog')?.dataset.glassState === 'active'`,
-            ),
+        () => page.evaluate(`document.querySelector('dialog')?.open`),
         'reopened dialog paints',
     )
     assert.equal(await page.evaluate('controlErrorQueries'), 0)
@@ -154,6 +144,6 @@ export async function checkGlassFields({ page, click, until }) {
     )
     await click('[aria-label="关闭对话框"]')
     console.log(
-        'PASS: glass input typing, dialog pixels, independent context recovery, preserved focus/form state, Escape and reopen',
+        'PASS: solid dialog, native typing, glass controls and field recovery, preserved focus/form state, Escape and reopen',
     )
 }

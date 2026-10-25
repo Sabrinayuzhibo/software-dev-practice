@@ -83,9 +83,11 @@ QJsonObject Channel::call(const QString& action, const QJsonObject& payload)
         require(messages.size() == 1 && messages.first().requestId == id,
                 "Mismatched server response");
         const auto& message = messages.first();
-        require(message.type != "error",
-                message.payload.value("reason").toString(
-                    "Server rejected request"));
+        if (message.type == "error")
+        {
+            throw ServerError(message.payload.value("reason").toString(
+                "Server rejected request"));
+        }
         require(message.type == (action == "ping" ? "pong" : "result"),
                 "Invalid response type");
         return message.payload;

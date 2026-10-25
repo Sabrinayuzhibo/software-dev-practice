@@ -586,6 +586,19 @@ td.digest {
     color: #27312f;
     background: #fff;
     font-size: 13px;
+    box-shadow: 0 16px 40px rgb(33 51 63 / 18%);
+}
+.version-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+}
+.delete-version {
+    color: #b83232;
+}
+.workflow-dialog::backdrop {
+    background: rgb(41 41 58 / 23%);
 }
 .workflow-dialog-content {
     max-height: calc(100vh - 42px);

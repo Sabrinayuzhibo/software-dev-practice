@@ -53,7 +53,8 @@ def check(agent, server):
             assert {item["type"] for item in scan["warnings"]} == {"character_device", "block_device", "socket"}
             version = fixture.backup(task["id"])
             assert len(version["warnings"]) == 3
-            assert all(item["type"] in item["reason"] for item in version["warnings"])
+            assert all(item["type"] in item["reason"].lower()
+                       for item in version["warnings"])
             fixture.restore(version["id"], root / "ordinary-restore")
             for name in ("character", "block", "socket"):
                 assert not os.path.lexists(root / "ordinary-restore" / name)
@@ -61,26 +62,28 @@ def check(agent, server):
 
             selected = fixture.request("add_task", {
                 "target_id": "local", "sources": [str(source)],
-                "file_types": ["character_device", "block_device", "socket"],
+                "file_types": ["character_device", "block_device"],
                 "preserve_empty_dirs": False,
             })
             selected_scan = fixture.request("scan", {"task_id": selected["id"]})
-            assert selected_scan["complete"] and not selected_scan["warnings"]
+            assert selected_scan["complete"]
+            assert [item["type"] for item in selected_scan["warnings"]] == ["socket"]
             assert all(selected_scan[field] == 1 for field in
-                       ("character_devices", "block_devices", "sockets"))
+                       ("character_devices", "block_devices"))
+            assert selected_scan["sockets"] == 0
             node_version = fixture.backup(selected["id"])
-            assert node_version["format"] == 4 and not node_version["warnings"]
+            assert node_version["format"] == 4
+            assert [item["type"] for item in node_version["warnings"]] == ["socket"]
             node_directory = manifest_path(fixture, node_version)
             node_entries = {item["path"]: item for item in
                             (json.loads(line) for line in
                              (node_directory / "entries.jsonl").read_text().splitlines())}
-            assert set(node_entries) == {"character", "block", "socket"}
+            assert set(node_entries) == {"character", "block"}
             assert not list(node_directory.glob("*.data"))
             for name in ("character", "block"):
                 source_info = (source / name).lstat()
                 assert int(node_entries[name]["device_major"]) == os.major(source_info.st_rdev)
                 assert int(node_entries[name]["device_minor"]) == os.minor(source_info.st_rdev)
-            assert "device_major" not in node_entries["socket"]
 
             destination = root / "node-restore"
             destination.mkdir()
@@ -100,11 +103,11 @@ def check(agent, server):
             restored = fixture.restore(node_version["id"], destination,
                                        can_restore_devices)
             if can_restore_devices:
-                assert restored["state"] == "SUCCEEDED"
+                assert restored["state"] == "SUCCEEDED_WITH_WARNINGS"
                 for name, mode in (("character", stat.S_ISCHR),
-                                   ("block", stat.S_ISBLK),
-                                   ("socket", stat.S_ISSOCK)):
+                                   ("block", stat.S_ISBLK)):
                     assert mode((destination / name).lstat().st_mode)
+                assert not os.path.lexists(destination / "socket")
                 for name in ("character", "block"):
                     assert (destination / name).lstat().st_rdev == (source / name).lstat().st_rdev
                 assert all(item["state"] == "written" for item in
@@ -116,7 +119,7 @@ def check(agent, server):
                 assert restore_pages(fixture, restored["id"])[-1]["state"] == "pending"
                 assert all(not stat.S_ISREG(item.lstat().st_mode)
                            for item in destination.iterdir())
-            print("PASS: opted-in device numbers and socket nodes saved without device payloads; restore respects node permissions", flush=True)
+            print("PASS: opted-in device numbers are saved without payloads; socket nodes remain skipped", flush=True)
 
             directory = manifest_path(fixture, version)
             entries = [json.loads(line) for line in (directory / "entries.jsonl").read_text().splitlines()]

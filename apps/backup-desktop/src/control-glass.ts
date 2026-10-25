@@ -15,7 +15,7 @@ const kMaximumRecoveryAttempts = 4
 let nextId = 0
 const sharedRenderers = new Map<ControlPool, ControlGlass>()
 
-/** Separate large static surfaces from the small animated control buffer. */
+/** Render fields separately from animated buttons and switches. */
 class ControlGlass {
     private entries = new Set<ControlEntry>()
     private renderer: LiquidGlassRenderer | null = null
@@ -91,9 +91,7 @@ class ControlGlass {
                         renderer.dispose()
                         return
                     }
-                    if (this.pool !== 'sheet') {
-                        renderer.setBackgroundColor([1, 1, 1])
-                    }
+                    renderer.setBackgroundColor([1, 1, 1])
                     this.update()
                 })
                 .catch((error: unknown) => {
@@ -221,7 +219,7 @@ class ControlGlass {
     }
 }
 
-/** Register a native control or dialog; dispose its surface on unmount. */
+/** Register a native control; dispose its surface on unmount. */
 export function registerGlassControl(
     canvas: HTMLCanvasElement,
     options: () => ControlOptions,
@@ -233,7 +231,7 @@ export function registerGlassControl(
         throw new Error('无法创建玻璃控件显示层')
     }
     const kind = options().kind
-    const pool = kind === 'field' || kind === 'sheet' ? kind : 'control'
+    const pool = kind === 'field' ? kind : 'control'
     let renderer = sharedRenderers.get(pool)
     if (!renderer) {
         renderer = new ControlGlass(pool)

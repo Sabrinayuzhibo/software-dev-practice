@@ -211,13 +211,13 @@ class CommandReader final : public QObject
         {
             action = action.mid(6);
             require(action == "scan" || action == "backup" ||
-                        action == "restore",
+                        action == "restore" || action == "delete_version",
                     "Only data operations have an asynchronous start command");
         }
         require(action == "ping" || action == "versions" ||
                     action == "version_warnings" || action == "scan" ||
                     action == "backup" || action == "restore" ||
-                    action == "confirm",
+                    action == "confirm" || action == "delete_version",
                 "Unsupported command");
         QJsonObject task;
         if (action == "backup" ||
@@ -268,11 +268,33 @@ class CommandReader final : public QObject
             target =
                 state_.operation(text(args, "id")).value("target").toObject();
         }
+        if (action == "delete_version")
+        {
+            if (args.contains("retry_operation_id"))
+            {
+                const auto previous =
+                    state_.operation(text(args, "retry_operation_id"));
+                require(previous.value("action") == "delete_version" &&
+                            (previous.value("state") == "WAITING" ||
+                             previous.value("state") == "INTERRUPTED" ||
+                             previous.value("state") == "FAILED"),
+                        "Deletion operation is not retryable");
+                target = previous.value("target").toObject();
+                args.insert("version_id", previous.value("version_id"));
+                args.insert("repository_path", target.value("repository_path"));
+            }
+            require(validId(text(args, "version_id")),
+                    "Invalid version identifier");
+            if (!args.value("repository_path").toString().isEmpty())
+            {
+                target.insert("repository_path", args.value("repository_path"));
+            }
+        }
         const auto tasks = state_.config().value("tasks").toArray();
         const auto targets = state_.config().value("targets").toArray();
         const QString stateDirectory = state_.directory();
-        const bool recorded =
-            action == "scan" || action == "backup" || action == "restore";
+        const bool recorded = action == "scan" || action == "backup" ||
+                              action == "restore" || action == "delete_version";
         QJsonObject record{{"id", newId()},
                            {"action", action},
                            {"state", "RUNNING"},
@@ -365,6 +387,11 @@ class CommandReader final : public QObject
                             backup::agent::restore(args, target, tasks, targets,
                                                    stateDirectory, progress);
                     }
+                    else if (action == "delete_version")
+                    {
+                        result = backup::agent::deleteVersion(args, target,
+                                                              progress);
+                    }
                     else
                     {
                         result = query(action, args, target);
@@ -395,9 +422,11 @@ class CommandReader final : public QObject
                 catch (const std::exception& failure)
                 {
                     error = QString::fromUtf8(failure.what());
-                    record.insert("state", error.startsWith("COMMIT_UNCERTAIN")
-                                               ? "WAITING"
-                                               : "FAILED");
+                    record.insert("state",
+                                  (error.startsWith("COMMIT_UNCERTAIN") ||
+                                   error.startsWith("DELETE_UNCERTAIN"))
+                                      ? "WAITING"
+                                      : "FAILED");
                     record.insert("error", error);
                 }
                 record.insert("finished_at", now());

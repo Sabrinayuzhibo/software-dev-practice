@@ -122,10 +122,16 @@ State::State(const QString& directory) : directory_(canonicalPath(directory))
             const bool pendingCommit = record.value("action") == "backup" &&
                                        (record.value("stage") == "commit" ||
                                         record.value("stage") == "confirm");
-            record.insert("state", pendingCommit ? "WAITING" : "INTERRUPTED");
+            const bool pendingDeletion =
+                record.value("action") == "delete_version";
+            record.insert("state", pendingCommit || pendingDeletion
+                                       ? "WAITING"
+                                       : "INTERRUPTED");
             record.insert(
                 "error",
-                pendingCommit
+                pendingDeletion
+                    ? "Deletion may be incomplete; retry this operation"
+                : pendingCommit
                     ? "Backup commit may have completed; confirm this operation"
                     : "Agent exited before completion; restore may contain "
                       "partial files");
@@ -256,8 +262,7 @@ QJsonObject State::addTask(const QJsonObject& args)
     auto next = config_;
     next.insert("tasks", tasks);
     if (scope.fileTypes().contains("character_device") ||
-        scope.fileTypes().contains("block_device") ||
-        scope.fileTypes().contains("socket"))
+        scope.fileTypes().contains("block_device"))
     {
         next.insert("format", 5);
     }

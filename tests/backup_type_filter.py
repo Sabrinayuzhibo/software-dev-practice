@@ -7,6 +7,7 @@ from pathlib import Path
 import socket
 import sys
 import tempfile
+import uuid
 
 from backup_integration import Fixture, rpc, stop, tree
 
@@ -60,11 +61,11 @@ def run(agent, server):
             scan = fixture.request("scan", {"task_id": files["id"]})
             assert scan["complete"] and scan["files"] == 3
             assert scan["directories"] == 1 and scan["symlinks"] == 0
-            assert not scan["warnings"]
+            assert [item["type"] for item in scan["warnings"]] == ["socket", "socket"]
             version = fixture.backup(files["id"])
             assert version["file_types"] == ["file"]
             assert version["rules"]["file_types"] == ["file"]
-            assert not version["warnings"]
+            assert [item["type"] for item in version["warnings"]] == ["socket", "socket"]
             fixture.restore(version["id"], root / "files-output")
             assert set(tree(root / "files-output")) == {
                 "top.txt", "nested", "nested/inside.txt", "nested/skip.txt",
@@ -75,7 +76,8 @@ def run(agent, server):
             assert directories["id"] != files["id"]
             directory_scan = fixture.request("scan", {"task_id": directories["id"]})
             assert directory_scan["complete"] and directory_scan["files"] == 0
-            assert directory_scan["directories"] == 3 and not directory_scan["warnings"]
+            assert directory_scan["directories"] == 3
+            assert [item["type"] for item in directory_scan["warnings"]] == ["socket", "socket"]
             directory_version = fixture.backup(directories["id"])
             fixture.restore(directory_version["id"], root / "directories-output")
             assert tree(root / "directories-output") == {
@@ -91,7 +93,7 @@ def run(agent, server):
             assert tree(root / "special-output") == {
                 "link": ("symlink", b"top.txt"), "pipe": "fifo",
             }
-            assert not special_version["warnings"]
+            assert [item["type"] for item in special_version["warnings"]] == ["socket", "socket"]
             passed("selected symlinks and FIFO retain their types without their file targets")
 
             for paths in ([source / "top.txt"], [source, source / "top.txt"],
@@ -232,24 +234,17 @@ def run(agent, server):
             new_summary_path.write_bytes(original_new)
             passed("saved empty-directory rule is checked before restoration")
 
-            nodes = add([source], ["socket"], False)
-            assert fixture.request("config")["format"] == 5
-            node_scan = fixture.request("scan", {"task_id": nodes["id"]})
-            assert node_scan["complete"] and node_scan["sockets"] == 2
-            assert node_scan["files"] == 0 and not node_scan["warnings"]
-            node_version = fixture.backup(nodes["id"])
-            assert node_version["format"] == 4 and node_version["sockets"] == "2"
-            assert not node_version["warnings"]
-            node_output = root / "socket-output"
-            fixture.restore(node_version["id"], node_output)
-            assert (node_output / "socket").is_socket()
-            assert (node_output / "nested/empty/socket").is_socket()
-            assert set(tree(node_output)) == {"nested", "nested/empty"}
-            direct_node = add([source / "socket"], ["socket"], False)
-            direct_version = fixture.backup(direct_node["id"])
-            fixture.restore(direct_version["id"], root / "direct-socket-output")
-            assert (root / "direct-socket-output/socket").is_socket()
-            passed("selected socket paths save and restore nodes without storing live connections")
+            for action in ("preview_sources", "add_task"):
+                for paths, types in (([source], ["socket"]),
+                                     ([source / "socket"], ["file"])):
+                    error = fixture.request(action, {
+                        "sources": [str(path) for path in paths],
+                        "target_id": "local", "file_types": types,
+                        "preserve_empty_dirs": False,
+                    }, ok=False)
+                    assert "Socket node" in error["message"]
+            assert fixture.request("config")["format"] == 4
+            passed("new tasks reject socket filters and directly selected socket nodes")
 
             stop(fixture.agent)
             fixture.start_agent()
@@ -262,13 +257,8 @@ def run(agent, server):
                         if item["id"] == files["id"])["file_types"] == ["file"]
             assert next(item for item in fixture.request("config")["tasks"]
                         if item["id"] == compact["id"])["preserve_empty_dirs"] is False
-            assert next(item for item in fixture.request("config")["tasks"]
-                        if item["id"] == nodes["id"])["file_types"] == ["socket"]
             record = fixture.request("operations")["operations"]
             assert any(item.get("file_types") == ["file"] for item in record)
-            assert any(item.get("task_id") == nodes["id"] and
-                       item.get("action") == "backup" and
-                       item.get("sockets") == 2 for item in record)
             fixture.request("remove_task", {"id": files["id"]})
             stop(fixture.server)
             fixture.start_server()
@@ -277,6 +267,28 @@ def run(agent, server):
             history = fixture.request("versions", {"target_id": "local", "task_id": files["id"]})
             assert history["versions"][0]["file_types"] == ["file"]
             passed("saved filters survive Agent/Server restart and task deletion")
+
+            stop(fixture.agent)
+            config_path = root / "agent-state/config.json"
+            config = json.loads(config_path.read_text())
+            old_socket_task = dict(compact, id=str(uuid.uuid4()),
+                                   file_types=["socket"])
+            config["tasks"].append(old_socket_task)
+            config["format"] = 5
+            config_path.write_text(json.dumps(config))
+            fixture.start_agent()
+            assert any(item["id"] == old_socket_task["id"]
+                       for item in fixture.request("config")["tasks"])
+            old_scan = fixture.request("scan", {"task_id": old_socket_task["id"]})
+            assert not old_scan["complete"]
+            assert "Socket node backups" in old_scan["warnings"][0]["reason"]
+            operation = fixture.request("start_backup", {
+                "task_id": old_socket_task["id"],
+            })["operation_id"]
+            failed = fixture.wait(operation, False)
+            assert "Socket node backups" in failed["error"]
+            assert json.loads(config_path.read_text())["tasks"][-1]["id"] == old_socket_task["id"]
+            passed("existing socket tasks remain readable but cannot produce new versions")
         finally:
             unix_socket.close()
             nested_socket.close()

@@ -26,7 +26,7 @@ agent_core = static_library('backup-agent-core',
   ['src/agent/agent_client.cpp', 'src/agent/channel.cpp',
    'src/agent/state.cpp', 'src/agent/history.cpp', 'src/agent/restore_journal.cpp',
    'src/agent/operations.cpp', 'src/agent/source_tree.cpp', 'src/agent/source_selection.cpp',
-   'src/agent/restore.cpp', agent_moc],
+   'src/agent/restore.cpp', 'src/agent/version_deletion.cpp', agent_moc],
   include_directories: inc,
   dependencies: [protocol_dep, qt_network])
 agent_dep = declare_dependency(
@@ -39,7 +39,8 @@ server_moc = qt6.compile_moc(
   include_directories: inc,
   dependencies: [qt_core, qt_network])
 server_core = static_library('backup-server-core',
-  ['src/server/backup_server.cpp', 'src/server/repository.cpp', server_moc],
+  ['src/server/backup_server.cpp', 'src/server/repository.cpp',
+   'src/server/version_deletion.cpp', server_moc],
   include_directories: inc,
   dependencies: [protocol_dep, qt_network])
 server_dep = declare_dependency(
@@ -107,4 +108,8 @@ test('backup-sources', python3,
   timeout: 120)
 test('backup-type-filter', python3,
   args: [files('tests/backup_type_filter.py')[0], agent.full_path(), server.full_path()],
+  timeout: 120)
+
+test('version-deletion', python3,
+  args: [files('tests/version_deletion.py')[0], agent.full_path(), server.full_path()],
   timeout: 120)

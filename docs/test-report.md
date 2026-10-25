@@ -408,3 +408,78 @@ Windows 测试使用 Win32 `ShowWindowAsync` 和鼠标事件，经 WSLg 到 Elec
 | 格式 | 涉及前端文件的 Prettier 检查和 `git diff --check` 通过；本机未安装 `clang-format`，未执行独立 C++ 格式检查 |
 
 证据：`build/meson-logs/testlog.txt`、`tests/backup_file_type_mounts.py`、`tests/backup_file_types.py`、`tests/backup_type_filter.py`、`tests/desktop_type_filter.mjs`；截图为 `/tmp/backup-type-filter-socket-composer-{1120,850}.png`。设备节点只保存编号，不是整盘镜像；socket 不保存连接、监听状态或进程。还原不提权，目标文件系统不支持节点创建时会失败并保留已写入范围。物理掉电及不同 Linux 文件系统上的设备创建仍未验收。
+
+## 2026-10-19 移除套接字节点备份
+
+执行者：Codex。范围仅限文件系统 Unix socket 节点；TCP 通信与历史版本还原保留。新建任务不提供 socket 类型，直接路径选择在 Agent 拒绝；目录扫描报告跳过，旧含 socket 类型的任务配置保持可读但扫描/备份明确失败。Server 的 begin 与 entry 两处拒绝新 socket 上传。测试已改为覆盖拒绝和旧版本兼容，但当前环境未能运行其集成断言。
+
+| 命令 / 验证项 | 实际结果 |
+| --- | --- |
+| `./scripts/build.sh` | C++ 重新编译、链接成功；Meson 13 套件中协议和核心 2 个通过，挂载测试 1 个跳过，其他 10 个均在 Server 启动时失败，错误为 `LISTEN_ERROR Unknown error`，未进入业务断言；脚本因此未运行到前端构建 |
+| `ninja -C build`（设置 Qt 库路径） | 最后一次 C++ 修改重新编译并链接成功。直接不设置 Qt 库路径时曾因找不到 `libpxbackend-1.0.so` 链接失败，设置项目 Qt 路径后恢复 |
+| `meson test -C build protocol-test core-test --print-errorlogs`（设置 Qt 库路径） | 2/2 通过 |
+| `npm run build --prefix apps/backup-desktop` | TypeScript 检查和 Vite 构建通过 |
+| `node --check tests/desktop_type_filter.mjs`、`python3 -m py_compile`（三份修改的 Python 测试）、`git diff --check` | 均通过 |
+| `npm run test:bridge --prefix apps/backup-desktop` | 两次运行均失败：测试子进程提前退出，桥接层报告 `Backup Agent 已退出（代码 0）`；该失败未定位为本次改动，不能据此声称桥接回归通过 |
+| 网络集成与桌面回归 | 未完成。两次申请在允许本机回环监听的环境中重跑，审批服务均返回 503，命令未执行；当前沙箱中 Server 无法监听测试端口 |
+
+待在允许本机回环监听的环境中重跑 `./scripts/build.sh` 和 `npm run test:window --prefix apps/backup-desktop`，核对新任务拒绝、Server 拒绝、旧配置保留及历史 socket 版本还原。`backup-file-type-mounts` 还需要支持私有挂载命名空间及可用块设备节点的 Linux 环境。
+
+## 2026-10-19 新建任务弹窗改为纯色表面
+
+执行者：Codex。只调整新建任务弹窗：不挂载弹窗、文本框、下拉框及文件类型开关的玻璃画布；关闭、添加、取消和创建等按钮继续使用液态玻璃组件。其他工作流弹窗保持原有样式。
+
+| 命令 / 验证项 | 实际结果 |
+| --- | --- |
+| `npm run build --prefix apps/backup-desktop` | TypeScript 检查及 Vite 构建通过 |
+| `node --check tests/desktop_type_filter.mjs`、`git diff --check` | 均通过 |
+| `npm run test:window --prefix apps/backup-desktop` | 未运行到界面断言：测试准备阶段创建 Unix socket 节点时收到 `PermissionError: Operation not permitted` |
+| 带本机 socket 权限的窗口回归 | 已申请执行，但自动审批服务返回 503，命令未执行；没有取得本轮窗口截图或视觉验收结果 |
+
+桌面回归新增断言会检查新建任务弹窗无玻璃面板/字段/开关画布、按钮仍有玻璃画布；需在允许创建 Unix socket 节点的环境中补跑。
+
+## 2026-10-19 新建任务开关恢复液态玻璃
+
+执行者：Codex。根据反馈，恢复普通文件、软链接、FIFO、常用全选和保留空目录的 `GlassSwitch`，展开后的设备类型也使用同一组件。新建任务弹窗仍为纯色背景，输入框和下拉框仍为普通控件；操作按钮继续使用 `GlassButton`。本节覆盖上一节中“文件类型开关不挂载玻璃画布”的描述。
+
+| 命令 / 验证项 | 实际结果 |
+| --- | --- |
+| `npm run build --prefix apps/backup-desktop` | TypeScript 检查及 Vite 构建通过 |
+| `npm run test:window --prefix apps/backup-desktop` | 测试准备阶段创建 Unix socket 节点时收到 `PermissionError: Operation not permitted`，未运行到新增的弹窗断言 |
+| 带本机 socket 权限的窗口回归 | 自动审批服务返回 503，命令未执行；本轮未取得截图或视觉验收结果 |
+
+桌面回归断言已改为要求纯色弹窗内保留液态玻璃按钮和开关画布。需在允许创建 Unix socket 节点的环境中补跑。
+
+## 2026-10-19 工作流弹窗背景改为普通面板
+
+执行者：Codex。移除任务和还原版本弹窗不再挂载整面液态玻璃画布，与此前的新建任务弹窗统一使用白色面板；按钮、开关、输入框和侧栏的玻璃效果保留。删除仅供弹窗背景使用的渲染分支，并为移除任务确认弹窗添加外观断言。
+
+| 命令 / 验证项 | 实际结果 |
+| --- | --- |
+| `npm run build --prefix apps/backup-desktop` | TypeScript 检查及 Vite 构建通过 |
+| `node --check tests/desktop_window_smoke.mjs`、`git diff --check` | 均通过 |
+| `node tests/desktop_window_smoke.mjs` | 测试准备阶段创建 Unix socket 节点时收到 `PermissionError: Operation not permitted`，未运行到弹窗断言 |
+| 带本机 socket 权限的窗口回归 | 自动审批服务调用 `gpt-5.6-luna` 返回 503，命令未执行；本轮未取得窗口截图 |
+
+需在允许创建 Unix socket 节点的环境中补跑完整桌面回归，确认删除及还原弹窗的实际视觉效果。
+
+## 2026-10-25 单个备份版本删除
+
+执行者：Codex 自动化运行。基于 `bfa17ac` 的未提交工作区，保留已有的 socket 备份移除和普通弹窗背景改动，按 huawei-coding 规范实现。所有备份、删除及故障注入均位于独立临时目录，没有删除用户仓库。范围为 FR-16 手动单版删除和 FR-17 执行反馈，对应 AC-38；不包含保留策略或自动回收。
+
+| 命令 / 验证项 | 实际结果 |
+| --- | --- |
+| `./scripts/build.sh` | C++ 编译及链接通过，无新增编译警告；14 个 Meson 套件全部通过，0 失败、0 跳过；TypeScript 检查与 Vite 构建通过。包含真实 ENOSPC、旧版本兼容、FR-10、类型筛选和 1 GiB 流式备份还原 |
+| `version-deletion` / AC-38 | 通过，完整构建中耗时 28.07 秒。实际回收所选版本目录，源文件及其他版本保持不变，其他版本可还原；删除任务后仍可删版本，重复请求成功且不能用已删 ID 再次上传 |
+| 删除边界 | 未认证、非法 ID、错误仓库、链接版本目录均拒绝；真实读取连接持有版本时删除失败，断开后可删除；内容软链接只移除链接本身，外部哨兵文件不变 |
+| 中断与重试 | 超过 300 个文件触发多批回收；首批后重启 Server 可继续。删除回执被丢弃时记录 WAITING，修改当前目标后重试仍使用原目标快照；杀死 Agent 后重启恢复 WAITING，再次确认可完成。回执写入失败时版本保留，移出列表后的权限失败可修复并继续；结果记录跨 Agent 重启保留 |
+| `node tests/desktop_window_smoke.mjs` | 最终完整回归通过。新建两个真实版本，核对确认摘要、不可撤销提示和“取消”默认焦点；取消不删除；发起失败时弹窗保留错误；实际撤销删除目录写权限造成执行失败，从执行记录打开“重试删除”并确认后成功；版本列表刷新、源与任务保留、记录重载及剩余版本实际还原均通过 |
+| 桌面布局 | 查看 1120×760、850×600 截图，确认弹窗为白色普通面板、按钮有玻璃画布，完整版本 ID 与路径可辨，无横向溢出，底部按钮可见。既有玻璃像素、上下文恢复、拖动/键盘、最小化/恢复和页面状态归属检查继续通过 |
+| `npm run test:bridge --prefix apps/backup-desktop` | 通过：超大 UTF-8 回复只失败对应查询，后续请求及后台工作继续 |
+| 格式与差异 | 新 C++ 文件及已修改代码段通过 `clang-format --dry-run --Werror`；本轮前端和桌面测试通过 `prettier --check`；`git diff --check` 通过 |
+
+证据：`build/meson-logs/testlog.txt`、`tests/version_deletion.py`、`tests/desktop_version_deletion.mjs`；确认窗口截图为 `/tmp/backup-delete-confirm-{1120,850}.png`。本轮也完成了 2026-10-19 因环境权限未能运行的 socket 移除、普通面板与玻璃按钮/开关回归；对旧历史结果不作改写。
+
+测试过程记录：初次权限测试错误地在原版本目录撤销写权限，导致改名先失败，已改为首批移出后再撤销权限，以验证中途回收失败。GUI 发现 React 的 autoFocus 在原生 dialog 打开时被关闭图标抢占，改为打开后明确聚焦“取消”，回归通过。旧玻璃测试的整面玻璃和 8 个开关断言，与此前已授权的普通背景、移除 socket 选项不符，已更新。最终补测前有一次既有 WebGL 创建故障注入等待超时；未修改玻璃实现，重新运行完整套件通过。
+
+边界：删除完成会保留小型持久回执和执行历史；已有 Agent 共享警告与失败备份暂存不在删除范围。中断后部分内容可能已回收，用户需从记录重试，不提供撤销或自动启动清理。实际空间回收依赖文件系统，界面显示版本逻辑大小，不承诺等量的物理释放量。磁盘完全写满、无法保存删除意图时会失败，不绕过持久化保证；本轮未专门对删除注入 ENOSPC，也未验证物理断电或百万条目规模。需要同时重启客户端和 Server 加载新接口。

@@ -39,9 +39,12 @@ QJsonObject scan(const QJsonObject& source, const Progress& progress)
 QJsonObject backup(const QJsonObject& task, const QJsonObject& target,
                    const QString& operationId, const Progress& progress)
 {
+    const SourceScope source(task);
+    require(!source.fileTypes().contains("socket"),
+            "Socket node backups are no longer supported; create a task "
+            "without the socket type");
     Channel channel(target);
     channel.authenticate();
-    const SourceScope source(task);
     require(
         !source.overlaps(canonicalPath(text(channel.health(), "data_root"))),
         "Source overlaps repository");

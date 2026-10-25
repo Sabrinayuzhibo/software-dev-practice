@@ -4,9 +4,8 @@ export type ControlOptions =
     | { kind: 'button'; variant: 'surface' | 'primary' | 'danger' }
     | { kind: 'switch'; checked: boolean; setChecked: (value: boolean) => void }
     | { kind: 'field' }
-    | { kind: 'sheet' }
 
-export type ControlPool = 'control' | 'field' | 'sheet'
+export type ControlPool = 'control' | 'field'
 
 export interface ControlRegistration {
     update: () => void

@@ -8,6 +8,7 @@ import {
     Plus,
     RefreshCw,
     Settings,
+    Trash2,
 } from 'lucide-react'
 import { useState } from 'react'
 
@@ -233,7 +234,7 @@ export function VersionsView({ model }: { model: ConsoleModel }) {
                     </thead>
                     <tbody>
                         {versions.map((version) => (
-                            <tr key={version.id}>
+                            <tr key={version.id} data-version-id={version.id}>
                                 <td>
                                     {formatTime(version.completed_at)}
                                     <small title={version.id}>
@@ -301,13 +302,36 @@ export function VersionsView({ model }: { model: ConsoleModel }) {
                                         )}
                                 </td>
                                 <td>
-                                    <GlassButton
-                                        disabled={busy || versionsLoading}
-                                        onClick={() => requestRestore(version)}
-                                    >
-                                        <ArrowDownToLine size={16} />
-                                        还原到…
-                                    </GlassButton>
+                                    <div className="version-actions">
+                                        <GlassButton
+                                            disabled={busy || versionsLoading}
+                                            onClick={() =>
+                                                requestRestore(version)
+                                            }
+                                        >
+                                            <ArrowDownToLine size={16} />
+                                            还原到…
+                                        </GlassButton>
+                                        <GlassButton
+                                            className="icon-button delete-version"
+                                            title="删除备份版本"
+                                            aria-label="删除备份版本"
+                                            disabled={
+                                                busy ||
+                                                versionsLoading ||
+                                                !connection.root ||
+                                                ![
+                                                    'online',
+                                                    'storage-unavailable',
+                                                ].includes(connection.state)
+                                            }
+                                            onClick={() =>
+                                                model.requestDelete(version)
+                                            }
+                                        >
+                                            <Trash2 size={16} />
+                                        </GlassButton>
+                                    </div>
                                 </td>
                             </tr>
                         ))}

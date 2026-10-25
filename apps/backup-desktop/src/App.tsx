@@ -15,6 +15,7 @@ import { useBackupConsole } from './use-backup-console'
 import { TargetsView, TasksView, VersionsView } from './views'
 import { RecordsView } from './records-view'
 import { OperationPanel, WorkflowDialogs } from './workflow'
+import { DeleteVersionDialog } from './delete-version-dialog'
 const SidebarGlass = lazy(async () => ({
     default: (await import('./sidebar-glass')).SidebarGlass,
 }))
@@ -25,7 +26,10 @@ export default function App() {
     const showOperationPanel =
         model.tab === 'records' ||
         (model.tab === 'versions' &&
-            model.detail?.action === 'restore' &&
+            ['restore', 'delete_version'].includes(
+                model.detail?.action || '',
+            ) &&
+            model.detail &&
             model.detail.target.id === model.targetId)
     const panelId = showOperationPanel ? model.detail?.id : undefined
     useEffect(() => {
@@ -159,6 +163,7 @@ export default function App() {
                 </main>
             </div>
             <WorkflowDialogs model={model} />
+            <DeleteVersionDialog model={model} />
         </div>
     )
 }

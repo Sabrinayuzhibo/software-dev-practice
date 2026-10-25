@@ -54,6 +54,14 @@ def rewrite_manifest(directory, entries, version_format=4):
     return entries
 
 
+def allow_historical_socket(directory):
+    path = directory / "summary.json"
+    summary = json.loads(path.read_text())
+    summary["file_types"].append("socket")
+    summary["rules"]["file_types"].append("socket")
+    path.write_text(json.dumps(summary))
+
+
 def restore_pages(fixture, operation):
     entries = []
     offset = 0
@@ -224,13 +232,30 @@ def check_manifests(fixture):
 
     token = json.loads((root / "repository/database/access.json").read_text())["token"]
     for index, bad in enumerate([alias, dict(symlink, target_base64="AA=="),
-                                 {"path": "device", "type": "socket", "device_major": "1"}]):
+                                 {"path": "device", "type": "socket", "device_major": "1"},
+                                 {"path": "socket", "type": "socket"}]):
         with socket.create_connection(("127.0.0.1", fixture.port), timeout=5) as connection:
             rpc(connection, "authenticate", {"token": token})
             rpc(connection, "begin", {"operation_id": f"invalid-link-{index}",
                                       "source": str(source), "task_id": task["id"]})
             rpc(connection, "entry", bad, ok=False)
-    print("PASS: formats 1 and 2 remain readable; malformed special nodes fail before writes; Server rejects invalid entries", flush=True)
+    with socket.create_connection(("127.0.0.1", fixture.port), timeout=5) as connection:
+        rpc(connection, "authenticate", {"token": token})
+        rejected = rpc(connection, "begin", {
+            "operation_id": "socket-filter-rejected", "source": str(source),
+            "task_id": task["id"], "file_types": ["socket"],
+        }, ok=False)
+        assert "Socket node" in rejected["reason"]
+    rewrite_manifest(directory, [{"path": "node", "type": "socket"}])
+    historical = json.loads(summary_path.read_text())
+    historical["file_types"] = ["socket"]
+    historical["rules"] = {"file_types": ["socket"]}
+    summary_path.write_text(json.dumps(historical))
+    stop(fixture.server)
+    fixture.start_server()
+    fixture.restore(version["id"], root / "historical-socket")
+    assert (root / "historical-socket/node").is_socket()
+    print("PASS: legacy formats and socket versions remain restorable; new socket uploads are rejected", flush=True)
 
 
 def check_link_races(fixture):
@@ -314,11 +339,12 @@ def check_restore_failures(fixture, shim):
     (source / "file").write_bytes(b"unchanged version")
     task = fixture.request("add_task", {
         "target_id": "local", "sources": [str(source)],
-        "file_types": ["file", "symlink", "fifo", "socket"],
+        "file_types": ["file", "symlink", "fifo"],
         "preserve_empty_dirs": False,
     })
     version = fixture.backup(task["id"])
     directory = manifest_path(fixture, version)
+    allow_historical_socket(directory)
     anchor = dict(json.loads((directory / "entries.jsonl").read_text()), link_group="file")
     special = [
         {"path": "blocked-alias", "type": "hardlink", "link_to": "file",
@@ -352,7 +378,7 @@ def check_restore_failures(fixture, shim):
         stop(fixture.agent)
         fixture.start_agent()
         fixture.restore(version["id"], root / ("supported-" + entry["type"]))
-    print("PASS: injected EOPNOTSUPP for hardlink/symlink/FIFO/socket yields explicit failures, partial journals and no copy fallback", flush=True)
+    print("PASS: injected EOPNOTSUPP for hardlink/symlink/FIFO and historical socket yields explicit failures", flush=True)
 
 
 def check_parent_replacement(fixture):
@@ -363,11 +389,12 @@ def check_parent_replacement(fixture):
     (source / "barrier").write_bytes(b"pause here")
     task = fixture.request("add_task", {
         "target_id": "local", "sources": [str(source)],
-        "file_types": ["file", "symlink", "fifo", "socket"],
+        "file_types": ["file", "symlink", "fifo"],
         "preserve_empty_dirs": False,
     })
     version = fixture.backup(task["id"])
     directory = manifest_path(fixture, version)
+    allow_historical_socket(directory)
     entries = {item["path"]: item for item in
                (json.loads(line) for line in (directory / "entries.jsonl").read_text().splitlines())}
     anchor = dict(entries["anchor"], link_group="anchor")
@@ -409,7 +436,7 @@ def check_parent_replacement(fixture):
         finally:
             fixture.configure_target()
             proxy.close()
-    print("PASS: replacing a restore parent with an external symlink blocks all five leaf types without outside writes", flush=True)
+    print("PASS: replacing a restore parent with an external symlink blocks current types and historical socket without outside writes", flush=True)
 
 
 def run(agent, server, shim):

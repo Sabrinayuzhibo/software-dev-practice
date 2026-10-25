@@ -20,7 +20,8 @@ void Repository::open(const QString& root)
     makeDirectory(root);
     root_ = canonicalPath(root);
     for (const auto& child :
-         {"database", "storage", "storage/versions", "storage/staging"})
+         {"database", "database/deletions", "storage", "storage/versions",
+          "storage/staging", "storage/deleting"})
     {
         const QString path = root_ + '/' + child;
         require(!QFileInfo(path).isSymLink(),
@@ -29,6 +30,9 @@ void Repository::open(const QString& root)
     }
     lock_ = std::make_unique<QLockFile>(root_ + "/database/server.lock");
     require(lock_->tryLock(), "Repository is already in use");
+    // Deletion receipts and hidden versions must survive a restart together.
+    syncDirectory(root_ + "/database");
+    syncDirectory(root_ + "/storage");
     const QString tokenPath = root_ + "/database/access.json";
     if (!QFileInfo::exists(tokenPath))
     {
@@ -95,6 +99,9 @@ QString Repository::versionPath(const QString& id) const
 
 QJsonObject Repository::version(const QString& id) const
 {
+    const QFileInfo directory(versionPath(id));
+    require(directory.isDir() && !directory.isSymLink(),
+            "Version not found or invalid: " + id);
     auto result = readObject(versionPath(id) + "/summary.json");
     require(supportedVersionFormat(result.value("format").toInt()) &&
                 result.value("id") == id,
@@ -229,7 +236,11 @@ QJsonObject Repository::begin(const QJsonObject& request)
     const QString finalPath = versionPath(id);
     require(activeId_.isEmpty(), "Repository is busy");
     require(!QFileInfo::exists(finalPath), "Operation already committed");
+    require(!QFileInfo::exists(root_ + "/database/deletions/" + id + ".json"),
+            "Operation belongs to a deleted version");
     const SourceScope source(request, "source");
+    require(!source.fileTypes().contains("socket"),
+            "Socket node backups are no longer supported");
     require(!source.overlaps(root_), "Source overlaps repository");
     require(validId(text(request, "task_id")), "Invalid task identifier");
     if (request.contains("source_name"))
@@ -350,6 +361,7 @@ void Repository::addEntry(const QJsonObject& entry)
     entries_.checkPath(path);
     const QString type = text(entry, "type");
     require(supportedEntryType(type), "Unsupported entry type");
+    require(type != "socket", "Socket node backups are no longer supported");
     currentEntry_ = {{"path", path},
                      {"type", type},
                      {"index", QString::number(entries_.count())}};

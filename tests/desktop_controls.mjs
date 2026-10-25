@@ -169,7 +169,7 @@ export async function checkGlassControls({ page, click, until }) {
     await until(
         () =>
             page.evaluate(
-                "document.querySelectorAll('.glass-switch[data-glass-state=active]').length === 8",
+                "document.querySelectorAll('.glass-switch[data-glass-state=active]').length === 7",
             ),
         'expanded switches',
     )

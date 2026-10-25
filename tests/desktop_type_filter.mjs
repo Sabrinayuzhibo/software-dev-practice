@@ -82,6 +82,22 @@ export async function checkTypeFilter({ page, main, click, until, temporary }) {
 
     await open()
     assert(
+        await page.evaluate(`(() => {
+            const dialog = document.querySelector('.workflow-dialog');
+            const surfaces = [...dialog.querySelectorAll('canvas.glass-surface')];
+            const switches = [...dialog.querySelectorAll('.file-type-picker .glass-switch')];
+            return !dialog.classList.contains('glass-sheet') &&
+                getComputedStyle(dialog).backdropFilter === 'none' &&
+                !dialog.querySelector('.glass-field') &&
+                switches.length === 5 &&
+                switches.every((item) => item.querySelector('canvas.glass-surface')) &&
+                surfaces.some((surface) => surface.parentElement.matches('button')) &&
+                surfaces.every((surface) =>
+                    surface.parentElement.matches('button, .glass-switch'));
+        })()`),
+        'new task dialog is solid while buttons and switches retain glass surfaces',
+    )
+    assert(
         await page.evaluate(
             "document.querySelector('.empty-directory-option input').checked",
         ),
@@ -321,9 +337,14 @@ export async function checkTypeFilter({ page, main, click, until, temporary }) {
     ])
     const socketPath = join(socketSource, 'skip-0000.socket')
     await open()
-    await click('.all-file-types input')
     await click('.special-type-toggle')
-    await click('[data-file-type="socket"] input')
+    assert(
+        await page.evaluate(
+            "!document.querySelector('[data-file-type=socket]')",
+        ),
+        'socket is not offered as a backup type',
+    )
+    await click('[data-file-type="character_device"] input')
     await click('.choose-special-path')
     await click('[aria-label="特殊节点绝对路径"]')
     await page.call('Input.insertText', { text: socketPath })
@@ -331,39 +352,22 @@ export async function checkTypeFilter({ page, main, click, until, temporary }) {
     await until(
         () =>
             page.evaluate(
-                "document.querySelector('.create-task')?.disabled === false",
+                "!!document.querySelector('dialog [role=alert]')",
             ),
-        'direct socket ready',
+        'direct socket rejected',
     )
     assert(
         (
             await page.evaluate(
-                "document.querySelector('.source-list').textContent",
+                "document.querySelector('dialog [role=alert]').textContent",
             )
-        ).includes('套接字'),
+        ).includes('不支持备份套接字节点'),
     )
-    await capture('socket-composer')
-    await click('.create-task')
-    await until(
-        () => page.evaluate("!document.querySelector('dialog[open]')"),
-        'socket task saved',
-    )
-    const socketTask = (
-        await page.evaluate('window.backup.getConfig()')
-    ).tasks.find((task) =>
-        task.selection?.some((item) => item.path === 'skip-0000.socket'),
-    )
-    assert.deepEqual(socketTask?.file_types, ['socket'])
-    const socketCard = `.task-card[data-task-id="${socketTask.id}"]`
-    await click(`${socketCard} .scan-button`)
-    await until(
-        () =>
-            page.evaluate(
-                `document.querySelector(${JSON.stringify(socketCard + ' .scan-table tbody tr')})?.dataset.type === 'socket'`,
-            ),
-        'socket scan preview',
+    assert(
+        await page.evaluate("document.querySelector('.create-task').disabled"),
+        'socket source cannot be saved',
     )
     console.log(
-        'PASS: direct socket path can be selected and scanned through the task composer',
+        'PASS: socket type is unavailable and a directly entered socket source is rejected',
     )
 }

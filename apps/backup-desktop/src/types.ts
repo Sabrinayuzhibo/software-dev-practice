@@ -17,7 +17,7 @@ export type FileType =
     | 'character_device'
     | 'block_device'
     | 'socket'
-export type ContentFileType = Exclude<FileType, 'directory'>
+export type ContentFileType = Exclude<FileType, 'directory' | 'socket'>
 
 export interface SourceEntry {
     path: string
@@ -121,6 +121,7 @@ export interface Operation {
     file_types?: FileType[]
     preserve_empty_dirs?: boolean
     destination?: string
+    version_id?: string
     target: Target
     path?: string
     files: number
@@ -142,6 +143,13 @@ export interface Operation {
     failure_count?: number
     warning_runs?: number
     result?: ScanResult & { version?: Version; destination?: string }
+}
+
+export interface VersionDeletion {
+    version: Pick<Version, 'id'> & Partial<Version>
+    target: Target
+    repositoryPath: string
+    retryOperationId?: string
 }
 
 export interface OperationPage {
@@ -214,6 +222,12 @@ export interface DesktopApi {
         versionId: string,
         offset?: number,
     ): Promise<WarningPage>
+    deleteVersion(
+        targetId: string,
+        versionId: string,
+        repositoryPath: string,
+    ): Promise<{ operation_id: string }>
+    retryVersionDeletion(id: string): Promise<{ operation_id: string }>
     restoreVersion(
         targetId: string,
         versionId: string,

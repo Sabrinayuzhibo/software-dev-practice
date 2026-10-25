@@ -2,6 +2,7 @@
 
 #include "backup/server/repository.h"
 #include <QObject>
+#include <QSet>
 #include <QTcpServer>
 
 namespace backup::server
@@ -19,7 +20,7 @@ class BackupServer : public QObject
 
   private:
     QJsonObject handleRequest(const QString& action, const QJsonObject& args,
-                              bool* uploading);
+                              bool* uploading, QSet<QString>* reading);
     QTcpServer listener_;
     Repository repository_;
 };

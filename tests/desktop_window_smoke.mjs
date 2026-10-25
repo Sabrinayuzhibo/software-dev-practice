@@ -23,6 +23,7 @@ import { checkTypeFilter } from './desktop_type_filter.mjs'
 import { checkGlass, requireGlass } from './desktop_glass.mjs'
 import { checkGlassControls } from './desktop_controls.mjs'
 import { checkGlassFields } from './desktop_glass_fields.mjs'
+import { checkVersionDeletion } from './desktop_version_deletion.mjs'
 
 const root = fileURLToPath(new URL('../', import.meta.url))
 const execute = promisify(execFile)
@@ -461,6 +462,26 @@ try {
             ),
         'persisted directory task',
     )
+    await click('.task-card [aria-label="移除任务"]')
+    await until(
+        () =>
+            page.evaluate(
+                "document.querySelector('.workflow-dialog h2')?.textContent === '移除备份任务'",
+            ),
+        'remove task confirmation',
+    )
+    assert(
+        await page.evaluate(`(() => {
+            const dialog = document.querySelector('.workflow-dialog');
+            const surfaces = [...dialog.querySelectorAll('canvas.glass-surface')];
+            return getComputedStyle(dialog).backdropFilter === 'none' &&
+                getComputedStyle(dialog).backgroundColor === 'rgb(255, 255, 255)' &&
+                surfaces.length > 0 &&
+                surfaces.every((surface) => surface.parentElement.matches('button'));
+        })()`),
+        'confirmation uses a solid panel while buttons retain glass surfaces',
+    )
+    await click('[aria-label="关闭对话框"]')
     await page.evaluate(
         `window.backup.saveTarget({ id: 'local', name: 'GUI test repository', host: '127.0.0.1', port: ${slowServer.address().port} })`,
     )
@@ -1362,6 +1383,7 @@ try {
     await checkFileTypes({ page, main, click, until, temporary })
     await checkSources({ page, main, click, until, temporary })
     await checkTypeFilter({ page, main, click, until, temporary })
+    await checkVersionDeletion({ page, main, click, until, temporary })
     await page.evaluate(`
     globalThis.windowTestClicks = [];
     document.addEventListener('click', event => {

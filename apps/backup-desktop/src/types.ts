@@ -35,6 +35,8 @@ export interface SourcePlan {
     merged_count: number
 }
 
+export type Compression = 'none' | 'huffman' | 'lz77'
+
 export interface Target {
     id: string
     name: string
@@ -43,6 +45,7 @@ export interface Target {
     mode?: 'local'
     repository_path?: string
     data_root?: string
+    compression?: Compression
 }
 
 export interface Configuration {
@@ -62,7 +65,7 @@ export interface ScanResult {
     files: number
     directories: number
     bytes: number
-    stored_bytes?: number
+    stored_bytes?: number | string
     symlinks?: number
     hardlinks?: number
     fifos?: number
@@ -97,6 +100,7 @@ export interface Version {
     directories: string
     bytes: string
     stored_bytes?: string
+    compression?: Compression
     symlinks?: string
     hardlinks?: string
     fifos?: string

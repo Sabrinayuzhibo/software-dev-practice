@@ -913,6 +913,7 @@ summary {
     max-width: 706px;
 }
 .target-form h2,
+.compression-policy-hint,
 .repository-path,
 .form-actions {
     grid-column: 1 / -1;
@@ -922,6 +923,9 @@ summary {
     gap: 7px;
     color: #63776b;
     font-size: 12px;
+}
+.compression-policy {
+    grid-column: span 2;
 }
 .form-actions {
     display: flex;

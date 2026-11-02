@@ -12,7 +12,13 @@ import {
 } from 'lucide-react'
 import { useState } from 'react'
 
-import { formatBytes, formatTime, specialEntryCounts } from './ui'
+import {
+    compressionLabels,
+    formatBytes,
+    formatTime,
+    specialEntryCounts,
+} from './ui'
+import type { Compression } from './types'
 import type { ConsoleModel } from './use-backup-console'
 import { TaskCard } from './task-card'
 import { WarningDetails } from './warning-details'
@@ -34,6 +40,7 @@ export function TargetsView({ model }: { model: ConsoleModel }) {
                             <th>名称</th>
                             <th>服务地址</th>
                             <th>仓库</th>
+                            <th>压缩</th>
                             <th>操作</th>
                         </tr>
                     </thead>
@@ -50,6 +57,13 @@ export function TargetsView({ model }: { model: ConsoleModel }) {
                                     {item.repository_path ||
                                         item.data_root ||
                                         '由本机服务管理'}
+                                </td>
+                                <td>
+                                    {
+                                        compressionLabels[
+                                            item.compression || 'none'
+                                        ]
+                                    }
                                 </td>
                                 <td>
                                     <GlassButton
@@ -107,6 +121,23 @@ export function TargetsView({ model }: { model: ConsoleModel }) {
                         }
                     />
                 </label>
+                <label className="compression-policy">
+                    备份压缩
+                    <GlassSelect
+                        aria-label="备份压缩算法"
+                        value={targetDraft.compression || 'none'}
+                        onChange={(event) =>
+                            setTargetDraft({
+                                ...targetDraft,
+                                compression: event.target.value as Compression,
+                            })
+                        }
+                    >
+                        <option value="none">不压缩</option>
+                        <option value="huffman">Huffman（字节频率编码）</option>
+                        <option value="lz77">LZ77（滑动窗口编码）</option>
+                    </GlassSelect>
+                </label>
                 <label>
                     端口
                     <GlassInput
@@ -123,6 +154,9 @@ export function TargetsView({ model }: { model: ConsoleModel }) {
                         }
                     />
                 </label>
+                <p className="muted compression-policy-hint">
+                    压缩设置仅影响后续备份，已有版本按各自记录自动还原。无法缩小的数据块保留原文。
+                </p>
                 <div className="form-actions">
                     <GlassButton className="backup-button" disabled={mutating}>
                         保存目标
@@ -291,7 +325,9 @@ export function VersionsView({ model }: { model: ConsoleModel }) {
                                             {specialEntryCounts(version)}
                                         </small>
                                     )}
-                                    {Number(version.hardlinks) > 0 &&
+                                    {(Number(version.hardlinks) > 0 ||
+                                        (version.compression &&
+                                            version.compression !== 'none')) &&
                                         version.stored_bytes !== undefined && (
                                             <small>
                                                 内容存储：
@@ -300,6 +336,13 @@ export function VersionsView({ model }: { model: ConsoleModel }) {
                                                 )}
                                             </small>
                                         )}
+                                    <small className="version-compression">
+                                        {
+                                            compressionLabels[
+                                                version.compression || 'none'
+                                            ]
+                                        }
+                                    </small>
                                 </td>
                                 <td>
                                     <div className="version-actions">

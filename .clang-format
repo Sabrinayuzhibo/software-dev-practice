@@ -10,3 +10,5 @@ AllowShortLoopsOnASingleLine: false
 IndentCaseLabels: true
 PointerAlignment: Left
 InsertBraces: true
+# 保留中文命名空间注释，避免自动替换为英文。
+FixNamespaceComments: false

@@ -10,7 +10,9 @@ inc = include_directories('include')
 
 protocol = static_library('backup-protocol',
   ['src/protocol/frame.cpp', 'src/core/io.cpp', 'src/core/detail_page.cpp',
-   'src/core/manifest.cpp', 'src/core/source_scope.cpp'],
+   'src/core/manifest.cpp', 'src/core/source_scope.cpp',
+   'src/core/compression.cpp', 'src/core/compression_algorithm.cpp',
+   'src/core/huffman.cpp', 'src/core/lz77.cpp'],
   include_directories: inc,
   dependencies: qt_core)
 protocol_dep = declare_dependency(
@@ -67,6 +69,10 @@ core_test = executable('core-test', 'tests/core_test.cpp',
   include_directories: inc, dependencies: protocol_dep)
 test('core-test', core_test)
 
+compression_test = executable('compression-test', 'tests/compression_test.cpp',
+  include_directories: inc, dependencies: protocol_dep)
+test('compression-test', compression_test)
+
 python3 = find_program('python3')
 integration_test = files('tests/server_integration.py')[0]
 test('server-integration', python3,
@@ -113,3 +119,11 @@ test('backup-type-filter', python3,
 test('version-deletion', python3,
   args: [files('tests/version_deletion.py')[0], agent.full_path(), server.full_path()],
   timeout: 120)
+
+test('backup-compression', python3,
+  args: [files('tests/backup_compression.py')[0], agent.full_path(), server.full_path()],
+  timeout: 180)
+
+test('compression-streaming', python3,
+  args: [files('tests/compression_streaming.py')[0], agent.full_path(), server.full_path()],
+  timeout: 600)

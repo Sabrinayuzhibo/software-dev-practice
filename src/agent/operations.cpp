@@ -1,6 +1,7 @@
 #include "backup/agent/operations.h"
 #include "backup/agent/channel.h"
 #include "backup/agent/source_tree.h"
+#include "backup/core/compression.h"
 #include "backup/core/detail_page.h"
 #include "backup/core/io.h"
 #include "backup/core/source_scope.h"
@@ -49,6 +50,8 @@ QJsonObject backup(const QJsonObject& task, const QJsonObject& target,
         !source.overlaps(canonicalPath(text(channel.health(), "data_root"))),
         "Source overlaps repository");
     auto request = source.json("source");
+    const auto compression = compressionAlgorithm(target);
+    request.insert("compression", compression);
     struct stat rootInfo{};
     require(::stat(QFile::encodeName(source.root()).constData(), &rootInfo) == 0,
             "Cannot inspect source root metadata");
@@ -65,6 +68,9 @@ QJsonObject backup(const QJsonObject& task, const QJsonObject& target,
         request.insert("source_name", task.value("name"));
     }
     const auto receipt = channel.call("begin", request);
+    require(compression == "none" ||
+                receipt.value("compression") == compression,
+            "Server does not support selected compression; update the Server");
     require(source.selection().isEmpty() ||
                 receipt.value("selection") == source.selection(),
             "Server does not support selected sources; update the Server");
@@ -114,6 +120,8 @@ QJsonObject backup(const QJsonObject& task, const QJsonObject& target,
                         "this operation before starting another backup");
         }
     }
+    result.insert("stored_bytes", version.value("stored_bytes"));
+    result.insert("compression", compression);
     result.insert("version", version);
     return result;
 }

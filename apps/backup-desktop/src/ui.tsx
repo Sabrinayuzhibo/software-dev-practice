@@ -26,6 +26,12 @@ export const actionLabels: Record<string, string> = {
     restore: '还原',
     delete_version: '删除版本',
 }
+
+export const compressionLabels = {
+    none: '不压缩',
+    huffman: 'Huffman',
+    lz77: 'LZ77',
+}
 export const stageLabels: Record<string, string> = {
     prepare: '准备',
     scan: '扫描',

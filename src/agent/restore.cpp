@@ -1,6 +1,7 @@
 #include "backup/agent/channel.h"
 #include "backup/agent/operations.h"
 #include "backup/agent/restore_journal.h"
+#include "backup/core/compression.h"
 #include "backup/core/io.h"
 #include "backup/core/manifest.h"
 #include "backup/core/source_scope.h"
@@ -49,6 +50,12 @@ void fetchManifest(Channel& channel, const QString& versionId,
         for (const auto& value : page.value("entries").toArray())
         {
             const auto entry = value.toObject();
+            if (format >= 5 && entry.value("type") == "file")
+            {
+                require(compressionAlgorithm(entry) ==
+                            compressionAlgorithm(summary),
+                        "Content compression differs from version policy");
+            }
             require(scope.allows(entry),
                     "Manifest entry is outside the saved selection: " +
                         text(entry, "path"));
@@ -199,8 +206,24 @@ struct stat restoreFile(Channel& channel, const QString& versionId, int parent,
     try
     {
         QCryptographicHash hash(QCryptographicHash::Sha256);
+        QCryptographicHash storedHash(QCryptographicHash::Sha256);
         qint64 offset = 0;
+        qint64 originalOffset = 0;
         const auto size = number(entry, "size");
+        const auto compression = compressionAlgorithm(entry);
+        const auto storedSize =
+            compression == "none" ? size : number(entry, "stored_size");
+        QByteArray pending;
+        const auto writeDecoded = [&](const QByteArray& data)
+        {
+            require(data.size() <= size - originalOffset,
+                    "Decompressed content exceeds declared size");
+            writeAll(file, data);
+            hash.addData(data);
+            originalOffset += data.size();
+            status.insert("bytes", number(status, "bytes") + data.size());
+            progress(status);
+        };
         while (true)
         {
             checkCancelled();
@@ -212,25 +235,54 @@ struct stat restoreFile(Channel& channel, const QString& versionId, int parent,
                 reply.value("data").toString().toLatin1(),
                 QByteArray::AbortOnBase64DecodingErrors);
             require(bool(decoded) && decoded.decoded.size() <= kChunkBytes &&
-                        number(reply, "offset") == offset,
+                        number(reply, "offset") == offset &&
+                        reply.value("done").isBool(),
                     "Invalid download block");
             const auto& data = decoded.decoded;
-            require(data.size() <= size - offset,
+            require(data.size() <= storedSize - offset,
                     "Backup content exceeds declared size");
-            writeAll(file, data);
-            hash.addData(data);
+            storedHash.addData(data);
             offset += data.size();
-            status.insert("bytes", number(status, "bytes") + data.size());
-            progress(status);
+            if (compression == "none")
+            {
+                writeDecoded(data);
+            }
+            else
+            {
+                pending.append(data);
+                require(pending.size() <=
+                            kChunkBytes * 2 + kCompressionHeaderBytes,
+                        "Compressed block buffer exceeds supported size");
+                while (pending.size() >= kCompressionHeaderBytes)
+                {
+                    checkCancelled();
+                    const auto frameSize =
+                        compressionBlockSize(pending, compression);
+                    if (pending.size() < frameSize)
+                    {
+                        break;
+                    }
+                    const auto block =
+                        decompressBlock(pending.first(frameSize), compression);
+                    writeDecoded(block);
+                    pending.remove(0, frameSize);
+                }
+            }
             if (reply.value("done").toBool())
             {
                 break;
             }
             require(!data.isEmpty(), "Empty non-final download block");
         }
-        require(offset == size && QString::fromLatin1(hash.result().toHex()) ==
-                                      text(entry, "sha256"),
+        require(offset == storedSize && pending.isEmpty() &&
+                    originalOffset == size &&
+                    QString::fromLatin1(hash.result().toHex()) ==
+                        text(entry, "sha256"),
                 "Restored file checksum mismatch");
+        require(compression == "none" ||
+                    QString::fromLatin1(storedHash.result().toHex()) ==
+                        text(entry, "stored_sha256"),
+                "Compressed file checksum mismatch");
         restoreMetadata(descriptor.get(), entry, status);
         syncFile(file);
         publishFile(descriptor.get(), parent, leaf);

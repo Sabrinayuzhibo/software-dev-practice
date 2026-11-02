@@ -1,5 +1,6 @@
 #include "backup/agent/state.h"
 #include "backup/agent/source_selection.h"
+#include "backup/core/compression.h"
 #include "backup/core/io.h"
 #include "backup/core/source_scope.h"
 
@@ -54,7 +55,7 @@ State::State(const QString& directory) : directory_(canonicalPath(directory))
     {
         config_ = readObject(path);
         require((config_.value("format").toInt() >= 1 &&
-                 config_.value("format").toInt() <= 5) &&
+                 config_.value("format").toInt() <= 7) &&
                     config_.value("tasks").isArray() &&
                     config_.value("targets").isArray(),
                 "Invalid Agent configuration; original file preserved");
@@ -69,6 +70,9 @@ State::State(const QString& directory) : directory_(canonicalPath(directory))
                         number(item, "port") <= 65535,
                     "Invalid saved target");
             targetIds.insert(id);
+            require(compressionAlgorithm(item) == "none" ||
+                        config_.value("format").toInt() >= 7,
+                    "Compression requires configuration format 7");
         }
         QSet<QString> taskIds;
         for (const auto& value : config_.value("tasks").toArray())
@@ -261,8 +265,9 @@ QJsonObject State::addTask(const QJsonObject& args)
     tasks.append(created);
     auto next = config_;
     next.insert("tasks", tasks);
-    if (scope.fileTypes().contains("character_device") ||
-        scope.fileTypes().contains("block_device"))
+    if ((scope.fileTypes().contains("character_device") ||
+         scope.fileTypes().contains("block_device")) &&
+        next.value("format").toInt() < 5)
     {
         next.insert("format", 5);
     }
@@ -364,12 +369,19 @@ QJsonObject State::configure(const QString& action, const QJsonObject& args)
                     number(args, "port") <= 65535,
                 "Only local targets are supported");
         const auto name = text(args, "name");
+        const auto compression = compressionAlgorithm(args);
         auto targets = config_.value("targets").toArray();
         QJsonObject value{{"id", id},
                           {"name", name},
                           {"mode", "local"},
                           {"host", "127.0.0.1"},
                           {"port", args.value("port")}};
+        value.insert("compression", compression);
+        if (compression != "none")
+        {
+            // 使旧版 Agent 拒绝无法识别的压缩策略，防止静默忽略配置。
+            next.insert("format", 7);
+        }
         const auto repository = args.value("repository_path").toString();
         if (!repository.isEmpty())
         {

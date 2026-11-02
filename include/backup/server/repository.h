@@ -62,6 +62,8 @@ class Repository
     QCryptographicHash warningHash_{QCryptographicHash::Sha256};
     qint64 warningCount_ = 0;
     QCryptographicHash fileHash_{QCryptographicHash::Sha256};
+    QCryptographicHash storedHash_{QCryptographicHash::Sha256};
+    qint64 receivedBytes_ = 0;
     QCryptographicHash manifestHash_{QCryptographicHash::Sha256};
     std::unique_ptr<QLockFile> lock_;
 };

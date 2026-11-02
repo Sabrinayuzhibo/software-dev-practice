@@ -26,11 +26,12 @@
 | 本地控制 | Main 通过 JSON Lines 发送白名单命令；`start_scan/start_backup/start_restore/start_delete_version` 返回执行 ID，GUI 轮询记录；单个数据工作线程，事件线程仍可查询状态；关闭 GUI 终止 Agent |
 | 桌面交互（2026-10-07） | Main 串行发送请求直到收到响应，避免连接检查与数据请求争抢单个 Agent 工作线程；长操作返回执行 ID 后继续轮询。还原目录选择与发起还原分离，确认后才提交；版本按任务筛选。最小化时不暂停 Renderer 定时器，恢复时同步焦点并重绘 |
 | 服务接口 | 保留 `u32be length + JSON` 协议；文件块最多 256 KiB，以 Base64 放入内容消息，每块获得写入确认后再发下一块；清单和版本分页；本机令牌认证 |
-| 仓库格式 3，兼容读取 1、2 | `database/access.json` 存本地令牌；`storage/staging/<operation-id>/` 暂存；`storage/versions/<operation-id>/` 保存已提交版本；每版包含 summary.json、entries.jsonl、warnings.jsonl，只有普通文件内容条目生成按编号命名的 .data 文件。摘要保存 warning_count / warnings_sha256，查询仍兼容旧内嵌 warnings；历史版本不改写，两端程序需同时更新 |
+| 未压缩格式 4 / 压缩格式 5，兼容读取 1—4 | `database/access.json` 存本地令牌；`storage/staging/<operation-id>/` 暂存；`storage/versions/<operation-id>/` 保存已提交版本；每版包含 summary.json、entries.jsonl、warnings.jsonl，只有普通文件内容条目生成按编号命名的 .data 文件。摘要保存 warning_count / warnings_sha256，查询仍兼容旧内嵌 warnings；历史版本不改写，两端程序需同时更新 |
 | 大量警告 | 备份分批上传警告后提交；版本列表省略明细，version_warnings 按需返回，每页最多 100 项、64 KiB 并校验整份 JSONL。Agent 执行记录的重复明细按 SHA-256 共享；版本文件内容仍独立保存 |
 | 扫描 | 文件、目录及跳过条目带类型预览，样本同时受数量和字节上限约束。单项读取失败继续检查其他条目，保存 error_count / complete 和具体路径；扫描不完整时记录 FAILED 并保留预览。备份保持失败即停止的语义 |
 | 提交 | 每个文件验证长度/SHA-256 并 fsync，清单计算整体摘要；摘要与清单写入后同步目录，暂存目录原子改名为版本目录并同步父目录；该改名是唯一可见点；重复 commit 查询同一版本 |
 | 手动删除 | 版本列表的删除入口先确认所选版本。认证后的 `delete_version` 保存 `database/deletions/<id>.json` 回执，将版本原子移至 `storage/deleting/<id>/` 后每次最多回收 128 个条目；已完成回执继续保留。读取连接持有版本直到断开，期间删除被拒绝；无自动保留或清理策略 |
+| 压缩备份 | 目标策略可选 none/huffman/lz77，按课件自行实现；ICompressionAlgorithm 统一虚接口由 HuffmanAlgorithm / Lz77Algorithm 实现，工厂集中选择；Server 将原文块编码为最多 256 KiB 原文对应的独立块，Agent 自动解压校验后发布。配置格式 7；压缩版本格式 5，未压缩新版本保持 4，旧版本可读；`stored_bytes` 为实际内容字节数。详见[压缩实现说明](compression.md)，独立归档尚未实现 |
 | 故障恢复 | 未提交暂存从不参与查询/还原；保留用于诊断。Agent 重启将 RUNNING 记录标记 INTERRUPTED；提交阶段中断标为 WAITING，按同一执行 ID 查询。客户端连续 3 次查询失败时显示状态失联，停止自动轮询并保留操作锁；手动重试或窗口获得焦点时重新查询，不擅自终止 Agent 或认定备份失败 |
 | 还原 | 先验证分页清单和源/仓库重叠保护，再以目录 fd、openat/O_NOFOLLOW、mkdirat 创建条目；单个文件验证后以 linkat 无覆盖发布。`restores/<id>.jsonl` 在写入前同步 pending，完成持久化后同步 written；失败后分页返回已写入及待核对项，包含中断临时文件位置；重启保留该记录，撕裂的最后一行明确标记不完整 |
 | 资源与类型 | 有界文件块和网络缓冲；普通文件、目录、软链接、硬链接、FIFO 完整处理；字符/块设备默认警告跳过，显式选择后仅保存节点信息；socket 始终跳过。每版独立保存内容，组内硬链接仅保存一份；路径、类型状态集合随条目数增长，未承诺百万条目规模 |
@@ -49,7 +50,7 @@ Server 发布前与 Agent 还原前共用清单校验器，拒绝非目录父路
 
 Agent 对明确的服务拒绝记录 FAILED；传输结果不确定或重启时尚未结束的删除记录为 WAITING。用户从执行记录重新确认后，按原目标、仓库和版本重试；编辑目标配置不会改变重试范围。删除中断后不会自动在启动时继续销毁数据。确认弹窗为普通面板，操作按钮保留液态玻璃，默认键盘焦点在“取消”。
 
-当前尚未采用下文的 SQLite、跨版本对象去重、二进制 DATA 帧、Unix socket 常驻 Agent、远端 TLS、监控、压缩或加密。源文件可读性/类型、读取前后 stat 信息和目录变化会检查，但不提供文件系统原子快照。新程序直接读取格式 1、2 和 3；未来对象仓库迁移仍需单独设计，不能将现有格式直接当作该设计的数据。
+当前尚未采用下文的 SQLite、跨版本对象去重、二进制 DATA 帧、Unix socket 常驻 Agent、远端 TLS、监控或加密。源文件可读性/类型、读取前后 stat 信息和目录变化会检查，但不提供文件系统原子快照。新程序读取格式 1—5；未来对象仓库迁移仍需单独设计，不能将现有格式直接当作该设计的数据。
 
 基础代码分工：`src/core/io.cpp` 提供受检 I/O，`manifest.cpp` 校验清单，`source_scope.cpp` 定义保存的选择范围；`src/agent/source_selection.cpp` 校验及规范化用户选择，`state.cpp` 管配置和记录；`channel.cpp` 管工作线程的有界 RPC；`source_tree.cpp` 统一扫描与上传遍历，`operations.cpp` 编排扫描/备份，`restore.cpp` 校验并还原；`src/server/repository.cpp` 管暂存和版本；Main/Preload 只开放固定入口。C++ 的 `.clang-format` 与项目 skill 约束新代码。
 
@@ -281,9 +282,9 @@ P2 保存 rwx、mtime 秒/纳秒、UID/GID；不承诺 ACL、xattr、atime、cti
 
 ### 6.1 密钥与编码
 
-zstd 使用成熟库；加密使用 libsodium Argon2id 和 secretstream_xchacha20poly1305。仓库创建生成 16 字节 salt 与 32 字节根密钥，Argon2id（ops=3、mem=64 MiB）从密码派生封装密钥，XChaCha20-Poly1305 封装根密钥并绑定 repo_id/格式。公开保存盐、成本、随机 nonce 与密文；按独立上下文派生 K_id/K_object/K_manifest。重启只保留封装材料，用户密码验证后恢复内存密钥。丢失密码不能找回；首版不提供改密码/原地转密文。
+压缩按 2026-10-25 用户提供的课件改为自行实现 Huffman 与 LZ77，不再采用原定 zstd。当前目标策略、分块编码格式和校验流程见[压缩实现说明](compression.md)。以下加密与对象管线仍为后续设计：加密使用 libsodium Argon2id 和 secretstream_xchacha20poly1305。仓库创建生成 16 字节 salt 与 32 字节根密钥，Argon2id（ops=3、mem=64 MiB）从密码派生封装密钥，XChaCha20-Poly1305 封装根密钥并绑定 repo_id/格式。公开保存盐、成本、随机 nonce 与密文；按独立上下文派生 K_id/K_object/K_manifest。重启只保留封装材料，用户密码验证后恢复内存密钥。丢失密码不能找回；首版不提供改密码/原地转密文。
 
-原文流式 SHA-256 → 可选 zstd level 3 → 可选 secretstream → Storage。新对象有随机 stream header；最多 1 MiB 编码块各有认证标签，末块 FINAL；解码校验序号、关联数据、FINAL 和原文摘要。不由文件哈希固定 nonce；相同内容复用已有对象，不重用 nonce 加密其他字节。
+原文流式 SHA-256 → 可选 Huffman/LZ77 → 可选 secretstream → Storage。新对象有随机 stream header；最多 1 MiB 编码块各有认证标签，末块 FINAL；解码校验序号、关联数据、FINAL 和原文摘要。不由文件哈希固定 nonce；相同内容复用已有对象，不重用 nonce 加密其他字节。
 
 对象头记录格式/codec/原文长度/加密模式；原文哈希在私有清单。Agent 解码到临时文件，认证与 SHA 完全通过才发布该文件；失败不发布，之前完成文件作为部分恢复报告。清单独立加密，认证数据包括 repo_id/version_id/引用摘要；Server 只能验证存储摘要和引用，Agent 读取时验证标签。
 
@@ -341,7 +342,7 @@ trailer: record_count, total_length, digest/authentication
 | --- | --- | --- |
 | C++20、Qt Core/Network | 核心服务、事件/socket/TLS | 沿用现有模式 |
 | SQLite | 数据/事务 | 业务状态自主设计 |
-| zstd | 压缩/解压 | 报告明确第三方直接能力 |
+| 自行实现 Huffman / LZ77 | 压缩/解压 | 标准容器用于树与字典管理，不依赖第三方压缩实现；课程算法和改进见 compression.md |
 | libsodium、OpenSSL | KDF/认证加密/随机数/TLS | 可靠性优先，不声称自主密码算法 |
 | Electron/React/TypeScript | GUI | 脚本用于界面与受限控制 |
 | Meson/Ninja、npm/Vite | 构建 | 沿用并记录依赖/运行库 |

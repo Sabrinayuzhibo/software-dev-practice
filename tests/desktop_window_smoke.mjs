@@ -24,6 +24,7 @@ import { checkGlass, requireGlass } from './desktop_glass.mjs'
 import { checkGlassControls } from './desktop_controls.mjs'
 import { checkGlassFields } from './desktop_glass_fields.mjs'
 import { checkVersionDeletion } from './desktop_version_deletion.mjs'
+import { checkCompression } from './desktop_compression.mjs'
 
 const root = fileURLToPath(new URL('../', import.meta.url))
 const execute = promisify(execFile)
@@ -1384,6 +1385,7 @@ try {
     await checkSources({ page, main, click, until, temporary })
     await checkTypeFilter({ page, main, click, until, temporary })
     await checkVersionDeletion({ page, main, click, until, temporary })
+    await checkCompression({ page, main, click, until, temporary })
     await page.evaluate(`
     globalThis.windowTestClicks = [];
     document.addEventListener('click', event => {

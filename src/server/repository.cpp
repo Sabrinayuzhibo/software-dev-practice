@@ -1,4 +1,5 @@
 #include "backup/server/repository.h"
+#include "backup/core/compression.h"
 #include "backup/core/detail_page.h"
 #include "backup/core/io.h"
 #include "backup/core/source_scope.h"
@@ -106,6 +107,9 @@ QJsonObject Repository::version(const QString& id) const
     require(supportedVersionFormat(result.value("format").toInt()) &&
                 result.value("id") == id,
             "Unsupported or corrupt version");
+    const auto compression = compressionAlgorithm(result);
+    require((result.value("format").toInt() >= 5) == (compression != "none"),
+            "Compression does not match version format");
     const SourceScope scope(result, "source");
     require(result.value("format").toInt() >= 3 ||
                 (!scope.fileTypes().contains("character_device") &&
@@ -243,6 +247,7 @@ QJsonObject Repository::begin(const QJsonObject& request)
             "Socket node backups are no longer supported");
     require(!source.overlaps(root_), "Source overlaps repository");
     require(validId(text(request, "task_id")), "Invalid task identifier");
+    const auto compression = compressionAlgorithm(request);
     if (request.contains("source_name"))
     {
         require(text(request, "source_name").size() <= 120,
@@ -252,12 +257,17 @@ QJsonObject Repository::begin(const QJsonObject& request)
     require(!QFileInfo::exists(stagingPath_),
             "Operation already exists; use a new operation");
     makeDirectory(stagingPath_);
-    summary_ = {{"format", kVersionFormat},
+    summary_ = {{"format",
+                 compression == "none" ? kPlainVersionFormat : kVersionFormat},
                 {"id", id},
                 {"task_id", request.value("task_id")},
                 {"source", source.root()},
                 {"started_at", now()},
                 {"rules", QJsonObject{}}};
+    if (compression != "none")
+    {
+        summary_.insert("compression", compression);
+    }
     if (!source.fileTypes().isEmpty())
     {
         summary_.insert("file_types", source.fileTypes());
@@ -324,7 +334,7 @@ QJsonObject Repository::begin(const QJsonObject& request)
         throw;
     }
     activeId_ = id;
-    QJsonObject receipt{{"version_id", id}};
+    QJsonObject receipt{{"version_id", id}, {"compression", compression}};
     if (!source.selection().isEmpty())
     {
         receipt.insert("selection", source.selection());
@@ -347,7 +357,7 @@ QJsonObject Repository::begin(const QJsonObject& request)
 
 void Repository::recordEntry(const QJsonObject& entry)
 {
-    entries_.append(entry);
+    entries_.append(entry, summary_.value("format").toInt());
     const auto line =
         QJsonDocument(entry).toJson(QJsonDocument::Compact) + '\n';
     writeAll(manifest_, line);
@@ -397,6 +407,8 @@ void Repository::addEntry(const QJsonObject& entry)
     require(content_.open(QIODevice::WriteOnly | QIODevice::NewOnly),
             "Cannot create content");
     fileHash_.reset();
+    storedHash_.reset();
+    receivedBytes_ = 0;
 }
 
 void Repository::append(const QJsonObject& request)
@@ -407,23 +419,38 @@ void Repository::append(const QJsonObject& request)
     const auto data = QByteArray::fromBase64Encoding(
         encoded.toLatin1(), QByteArray::AbortOnBase64DecodingErrors);
     require(bool(data) && !data.decoded.isEmpty(), "Invalid content encoding");
-    require(number(request, "offset") == content_.pos(),
+    require(data.decoded.size() <= kChunkBytes,
+            "Decoded chunk exceeds supported size");
+    require(number(request, "offset") == receivedBytes_,
             "Unexpected content offset");
     require(data.decoded.size() <=
-                number(currentEntry_, "size") - content_.pos(),
+                number(currentEntry_, "size") - receivedBytes_,
             "Content exceeds declared size");
-    writeAll(content_, data.decoded);
+    const auto compression = compressionAlgorithm(summary_);
+    const auto stored = compression == "none"
+                            ? data.decoded
+                            : compressBlock(data.decoded, compression);
+    writeAll(content_, stored);
     fileHash_.addData(data.decoded);
+    storedHash_.addData(stored);
+    receivedBytes_ += data.decoded.size();
 }
 
 void Repository::finishFile(const QString& digest)
 {
     require(content_.isOpen(), "No active file");
-    require(content_.pos() == number(currentEntry_, "size"),
+    require(receivedBytes_ == number(currentEntry_, "size"),
             "Incomplete content");
     require(QString::fromLatin1(fileHash_.result().toHex()) == digest,
             "Content checksum mismatch");
     syncFile(content_);
+    if (compressionAlgorithm(summary_) != "none")
+    {
+        currentEntry_.insert("compression", summary_.value("compression"));
+        currentEntry_.insert("stored_size", QString::number(content_.pos()));
+        currentEntry_.insert("stored_sha256",
+                             QString::fromLatin1(storedHash_.result().toHex()));
+    }
     content_.close();
     currentEntry_.insert("sha256", digest);
     recordEntry(currentEntry_);

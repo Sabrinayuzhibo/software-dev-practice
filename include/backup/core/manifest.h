@@ -6,7 +6,8 @@
 
 namespace backup::core
 {
-inline constexpr int kVersionFormat = 4;
+inline constexpr int kPlainVersionFormat = 4;
+inline constexpr int kVersionFormat = 5;
 inline constexpr qsizetype kLinkTargetBytes = 4096;
 
 bool supportedEntryType(const QString& type);
@@ -22,7 +23,7 @@ class Manifest
 {
   public:
     void checkPath(const QString& path) const;
-    void append(const QJsonObject& entry, int format = kVersionFormat);
+    void append(const QJsonObject& entry, int format = kPlainVersionFormat);
     QJsonObject totals() const;
     qint64 count() const;
     bool contains(const QString& path) const;

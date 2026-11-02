@@ -1,4 +1,5 @@
 #include "backup/core/manifest.h"
+#include "backup/core/compression.h"
 #include "backup/core/io.h"
 
 #include <limits>
@@ -59,6 +60,23 @@ void Manifest::append(const QJsonObject& entry, int format)
                 (format >= 3 || (type != "character_device" &&
                                  type != "block_device" && type != "socket")),
             "Unsupported manifest type or version: " + path);
+    const bool encoded = format >= 5 && type == "file";
+    require(encoded || (!entry.contains("compression") &&
+                        !entry.contains("stored_size") &&
+                        !entry.contains("stored_sha256")),
+            "Compression fields do not match manifest format or type: " + path);
+    if (encoded)
+    {
+        const auto algorithm = compressionAlgorithm(entry);
+        const auto stored = number(entry, "stored_size");
+        const auto original = number(entry, "size");
+        const auto digest = text(entry, "stored_sha256").toLatin1();
+        require(algorithm != "none" && digest.size() == 64 &&
+                    QByteArray::fromHex(digest).toHex() == digest &&
+                    ((original == 0 && stored == 0) ||
+                     (original > 0 && stored >= kCompressionHeaderBytes + 1)),
+                "Invalid compressed content metadata: " + path);
+    }
     require(!entry.contains("link_group") ||
                 (format >= 2 && type == "file" &&
                  entry.value("link_group") == path),
@@ -147,7 +165,10 @@ void Manifest::append(const QJsonObject& entry, int format)
         }
         else
         {
-            storedBytes_ += size;
+            const auto stored = encoded ? number(entry, "stored_size") : size;
+            require(stored <= std::numeric_limits<qint64>::max() - storedBytes_,
+                    "Manifest stored size overflow");
+            storedBytes_ += stored;
             if (entry.contains("link_group"))
             {
                 groups_.insert(path, entry);

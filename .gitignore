@@ -6,3 +6,8 @@ apps/backup-desktop/dist-renderer/
 *.user
 *.user.*
 __pycache__/
+
+# 本地压缩课程参考资料
+/ref/7.压缩解压及其关键技术.pdf
+/ref/《打包解包技术》实验指导.pdf
+/ref/实验指导书-压缩解压.pdf

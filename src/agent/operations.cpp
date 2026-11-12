@@ -81,7 +81,7 @@ QJsonObject backup(const QJsonObject& task, const QJsonObject& target,
                 receipt.value("preserve_empty_dirs") ==
                     source.preservesEmptyDirectories(),
             "Server does not support empty directory rules; update the Server");
-    require(source.filters().isEmpty() ||
+    require(!source.hasFilters() ||
                 receipt.value("filters") == source.filters(),
             "Server does not support custom filters; update the Server");
     auto result = sourceTree(task, &channel, progress);

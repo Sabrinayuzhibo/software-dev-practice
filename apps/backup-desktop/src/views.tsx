@@ -1,3 +1,4 @@
+import { FilterSummary } from './backup-filters'
 import { GlassButton } from './glass-controls'
 import { GlassInput, GlassSelect } from './glass-fields'
 import {
@@ -320,6 +321,7 @@ export function VersionsView({ model }: { model: ConsoleModel }) {
                                             version.preserve_empty_dirs
                                         }
                                     />
+                                    <FilterSummary filters={version.filters} />
                                     {specialEntryCounts(version) && (
                                         <small>
                                             {specialEntryCounts(version)}

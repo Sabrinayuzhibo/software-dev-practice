@@ -95,12 +95,25 @@ function registerHandlers(): void {
         })
         return selection.canceled ? null : selection.filePaths
     })
+    // 主进程限制 IPC 体积，规则字段及数值边界仍由 Agent 最终校验。
+    const checkedFilters = (filters: unknown) => {
+        if (
+            !filters ||
+            typeof filters !== 'object' ||
+            Array.isArray(filters) ||
+            Buffer.byteLength(JSON.stringify(filters), 'utf8') > 16 * 1024
+        ) {
+            throw new Error('自定义筛选规则无效或过大')
+        }
+        return filters
+    }
     const sourceArgs = (
         paths: unknown,
         targetId: unknown,
         fileTypes: unknown,
         preserveEmptyDirs: unknown,
         name?: unknown,
+        filters?: unknown,
     ) => {
         const supported = [
             'file',
@@ -134,6 +147,9 @@ function registerHandlers(): void {
             file_types: fileTypes,
             preserve_empty_dirs: preserveEmptyDirs,
             ...(name !== undefined ? { name } : {}),
+            ...(filters !== undefined
+                ? { filters: checkedFilters(filters) }
+                : {}),
         }
     }
     ipcMain.handle(
@@ -144,10 +160,18 @@ function registerHandlers(): void {
             targetId: unknown,
             fileTypes: unknown,
             preserveEmptyDirs: unknown,
+            filters?: unknown,
         ) =>
             bridge.send(
                 'preview_sources',
-                sourceArgs(paths, targetId, fileTypes, preserveEmptyDirs),
+                sourceArgs(
+                    paths,
+                    targetId,
+                    fileTypes,
+                    preserveEmptyDirs,
+                    undefined,
+                    filters,
+                ),
             ),
     )
     ipcMain.handle(
@@ -159,12 +183,36 @@ function registerHandlers(): void {
             name: unknown,
             fileTypes: unknown,
             preserveEmptyDirs: unknown,
+            filters?: unknown,
         ) =>
             bridge.send(
                 'add_task',
-                sourceArgs(paths, targetId, fileTypes, preserveEmptyDirs, name),
+                sourceArgs(
+                    paths,
+                    targetId,
+                    fileTypes,
+                    preserveEmptyDirs,
+                    name,
+                    filters,
+                ),
             ),
     )
+    for (const [channel, action] of [
+        ['tasks:update-filters', 'update_task_filters'],
+        ['tasks:preview-filters', 'start_filter_preview'],
+    ]) {
+        ipcMain.handle(channel, (_event, id: unknown, filters: unknown) => {
+            if (typeof id !== 'string' || !id || id.length > 120) {
+                throw new Error('任务标识无效')
+            }
+            return bridge.send(action, {
+                ...(action === 'update_task_filters'
+                    ? { id }
+                    : { task_id: id }),
+                filters: checkedFilters(filters),
+            })
+        })
+    }
     ipcMain.handle('tasks:remove', (_event, id: unknown) =>
         bridge.send('remove_task', { id }),
     )

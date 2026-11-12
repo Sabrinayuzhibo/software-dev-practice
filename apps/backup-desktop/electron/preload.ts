@@ -15,6 +15,7 @@ contextBridge.exposeInMainWorld('backup', {
         targetId: string,
         fileTypes: string[],
         preserveEmptyDirs: boolean,
+        filters?: unknown,
     ) =>
         ipcRenderer.invoke(
             'sources:preview',
@@ -22,6 +23,7 @@ contextBridge.exposeInMainWorld('backup', {
             targetId,
             fileTypes,
             preserveEmptyDirs,
+            filters,
         ),
     createTask: (
         paths: string[],
@@ -29,6 +31,7 @@ contextBridge.exposeInMainWorld('backup', {
         name: string,
         fileTypes: string[],
         preserveEmptyDirs: boolean,
+        filters?: unknown,
     ) =>
         ipcRenderer.invoke(
             'tasks:create',
@@ -37,7 +40,12 @@ contextBridge.exposeInMainWorld('backup', {
             name,
             fileTypes,
             preserveEmptyDirs,
+            filters,
         ),
+    updateTaskFilters: (id: string, filters: unknown) =>
+        ipcRenderer.invoke('tasks:update-filters', id, filters),
+    previewTaskFilters: (id: string, filters: unknown) =>
+        ipcRenderer.invoke('tasks:preview-filters', id, filters),
     removeTask: (id: string) => ipcRenderer.invoke('tasks:remove', id),
     scanTask: (id: string) => ipcRenderer.invoke('tasks:scan', id),
     backupTask: (id: string) => ipcRenderer.invoke('tasks:backup', id),

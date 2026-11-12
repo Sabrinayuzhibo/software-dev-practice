@@ -121,6 +121,29 @@ def check(agent, server):
                            for item in destination.iterdir())
             print("PASS: opted-in device numbers are saved without payloads; socket nodes remain skipped", flush=True)
 
+            # 设备筛选使用实际 lstat 元数据，不能用缺失值伪装成 UID 0。
+            device_info = (source / "character").lstat()
+            device_filters = {"include": [
+                {"category": "type", "value": "character_device"},
+                {"category": "user", "value": str(device_info.st_uid)},
+                {"category": "mtime", "min": str(device_info.st_mtime_ns // 1000000000),
+                 "max": str(device_info.st_mtime_ns // 1000000000)},
+            ], "exclude": []}
+            fixture.request("update_task_filters", {
+                "id": selected["id"], "filters": device_filters,
+            })
+            filtered_scan = fixture.request("scan", {"task_id": selected["id"]})
+            assert filtered_scan["complete"] and filtered_scan["character_devices"] == 1
+            assert filtered_scan["block_devices"] == 0
+            filtered_version = fixture.backup(selected["id"])
+            filtered_directory = manifest_path(fixture, filtered_version)
+            filtered_entries = [json.loads(line) for line in
+                                (filtered_directory / "entries.jsonl").read_text().splitlines()]
+            assert len(filtered_entries) == 1 and filtered_entries[0]["path"] == "character"
+            assert int(filtered_entries[0]["uid"]) == device_info.st_uid
+            assert not list(filtered_directory.glob("*.data"))
+            print("PASS: device type, UID and inclusive mtime filters agree in scan and manifest without device I/O", flush=True)
+
             directory = manifest_path(fixture, version)
             entries = [json.loads(line) for line in (directory / "entries.jsonl").read_text().splitlines()]
             original = next(item for item in entries if item["type"] == "file" and "link_group" in item)

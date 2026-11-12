@@ -84,9 +84,10 @@ void Manifest::append(const QJsonObject& entry, int format)
     require((!entry.contains("link_to") || type == "hardlink") &&
                 (!entry.contains("target_base64") || type == "symlink"),
             "Link fields do not match entry type: " + path);
-    if (format >= 4 && (type == "file" || type == "hardlink" ||
-                        type == "directory" || type == "symlink" ||
-                        type == "fifo"))
+    if (format >= 4 &&
+        (type == "file" || type == "hardlink" || type == "directory" ||
+         type == "symlink" || type == "fifo" || type == "character_device" ||
+         type == "block_device"))
     {
         const QStringList metadataFields{"mode", "uid", "gid", "mtime_sec",
                                          "mtime_nsec"};
@@ -215,11 +216,25 @@ void Manifest::append(const QJsonObject& entry, int format)
     paths_.insert(path);
 }
 
-void Manifest::requirePopulatedDirectories() const
+void Manifest::requirePopulatedDirectories(
+    const QSet<QString>& allowedEmpty) const
 {
+    auto populated = contentParents_;
+    for (const auto& path : allowedEmpty)
+    {
+        require(directories_.contains(path),
+                "Unknown allowed directory: " + path);
+        populated.insert(path);
+        auto slash = path.lastIndexOf('/');
+        while (slash >= 0)
+        {
+            populated.insert(path.left(slash));
+            slash = path.lastIndexOf('/', slash - 1);
+        }
+    }
     for (const auto& path : directories_)
     {
-        require(contentParents_.contains(path),
+        require(populated.contains(path),
                 "Empty directory is excluded by saved rules: " + path);
     }
 }

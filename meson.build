@@ -11,6 +11,7 @@ inc = include_directories('include')
 protocol = static_library('backup-protocol',
   ['src/protocol/frame.cpp', 'src/core/io.cpp', 'src/core/detail_page.cpp',
    'src/core/manifest.cpp', 'src/core/source_scope.cpp',
+   'src/core/backup_filter.cpp',
    'src/core/compression.cpp', 'src/core/compression_algorithm.cpp',
    'src/core/huffman.cpp', 'src/core/lz77.cpp'],
   include_directories: inc,
@@ -73,6 +74,10 @@ compression_test = executable('compression-test', 'tests/compression_test.cpp',
   include_directories: inc, dependencies: protocol_dep)
 test('compression-test', compression_test)
 
+filter_test = executable('backup-filter-test', 'tests/backup_filter_test.cpp',
+  include_directories: inc, dependencies: protocol_dep)
+test('backup-filter-test', filter_test)
+
 python3 = find_program('python3')
 integration_test = files('tests/server_integration.py')[0]
 test('server-integration', python3,
@@ -114,6 +119,10 @@ test('backup-sources', python3,
   timeout: 120)
 test('backup-type-filter', python3,
   args: [files('tests/backup_type_filter.py')[0], agent.full_path(), server.full_path()],
+  timeout: 120)
+
+test('backup-custom-filter', python3,
+  args: [files('tests/backup_custom_filter.py')[0], agent.full_path(), server.full_path()],
   timeout: 120)
 
 test('version-deletion', python3,

@@ -313,6 +313,7 @@ QJsonObject Repository::begin(const QJsonObject& request)
         summary_.insert("root_metadata", metadata);
     }
     entries_ = {};
+    allowedEmptyDirectories_.clear();
     source_ = source;
     fileHash_.reset();
     manifestHash_.reset();
@@ -400,6 +401,13 @@ void Repository::addEntry(const QJsonObject& entry)
     if (type != "file")
     {
         recordEntry(currentEntry_);
+        if (type == "directory" && source_->hasFilters() &&
+            source_->preservesEmptyDirectories() &&
+            source_->matches(path, type, 0, number(currentEntry_, "uid"),
+                             signedNumber(currentEntry_, "mtime_sec")))
+        {
+            allowedEmptyDirectories_.insert(path);
+        }
         return;
     }
     content_.setFileName(stagingPath_ + '/' +
@@ -483,10 +491,10 @@ void Repository::appendWarnings(const QJsonObject& request)
 QJsonObject Repository::commit(const QString& id, const QJsonArray& warnings)
 {
     require(activeId_ == id && !content_.isOpen(), "Incomplete upload");
-    if (source_->hasEmptyDirectoryRule() &&
-        !source_->preservesEmptyDirectories())
+    if (source_->hasFilters() || (source_->hasEmptyDirectoryRule() &&
+                                  !source_->preservesEmptyDirectories()))
     {
-        entries_.requirePopulatedDirectories();
+        entries_.requirePopulatedDirectories(allowedEmptyDirectories_);
     }
     for (const auto& value : summary_.value("selection").toArray())
     {

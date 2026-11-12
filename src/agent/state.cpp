@@ -99,8 +99,7 @@ State::State(const QString& directory) : directory_(canonicalPath(directory))
                      !scope.fileTypes().contains("socket")) ||
                         config_.value("format").toInt() >= 5,
                     "Device and socket filters require configuration format 5");
-            require(!scope.hasFilters() ||
-                        config_.value("format").toInt() >= 6,
+            require(!scope.hasFilters() || config_.value("format").toInt() >= 6,
                     "Custom filters require configuration format 6");
             require(!item.contains("name") ||
                         (item.value("name").isString() &&
@@ -271,18 +270,15 @@ QJsonObject State::addTask(const QJsonObject& args)
     {
         next.insert("format", 5);
     }
-    else if (scope.hasEmptyDirectoryRule() &&
-             next.value("format").toInt() < 4)
+    else if (scope.hasEmptyDirectoryRule() && next.value("format").toInt() < 4)
     {
         next.insert("format", 4);
     }
-    else if (!scope.fileTypes().isEmpty() &&
-             next.value("format").toInt() < 3)
+    else if (!scope.fileTypes().isEmpty() && next.value("format").toInt() < 3)
     {
         next.insert("format", 3);
     }
-    else if (!scope.selection().isEmpty() &&
-             next.value("format").toInt() < 2)
+    else if (!scope.selection().isEmpty() && next.value("format").toInt() < 2)
     {
         next.insert("format", 2);
     }
@@ -294,6 +290,39 @@ QJsonObject State::addTask(const QJsonObject& args)
     return created;
 }
 
+QJsonObject State::updateTaskFilters(const QJsonObject& args)
+{
+    const auto id = text(args, "id");
+    auto updated = task(id);
+    require(args.value("filters").isObject(), "Invalid custom filters");
+    updated.insert("filters", args.value("filters"));
+    const SourceScope scope(updated);
+    auto tasks = config_.value("tasks").toArray();
+    for (qsizetype index = 0; index < tasks.size(); ++index)
+    {
+        const auto existing = tasks[index].toObject();
+        if (existing.value("id") == id)
+        {
+            tasks[index] = updated;
+        }
+        else
+        {
+            require(SourceScope(existing).json() != scope.json() ||
+                        !sameRepository(target(text(existing, "target_id")),
+                                        target(text(updated, "target_id"))),
+                    "A task with the same backup rules already exists");
+        }
+    }
+    auto next = config_;
+    next.insert("tasks", tasks);
+    if (scope.hasFilters() && next.value("format").toInt() < 6)
+    {
+        next.insert("format", 6);
+    }
+    save(next);
+    return updated;
+}
+
 QJsonObject State::importTasks(const QJsonArray& imported)
 {
     auto tasks = config_.value("tasks").toArray();
@@ -301,7 +330,8 @@ QJsonObject State::importTasks(const QJsonArray& imported)
     {
         auto item = value.toObject();
         require(!item.contains("selection") && !item.contains("file_types") &&
-                    !item.contains("preserve_empty_dirs"),
+                    !item.contains("preserve_empty_dirs") &&
+                    !item.contains("filters"),
                 "Legacy tasks must use whole directories; original preserved");
         const QString id = text(item, "id");
         require(validId(id), "Invalid legacy task identifier");
@@ -345,6 +375,10 @@ QJsonObject State::configure(const QString& action, const QJsonObject& args)
     if (action == "add_task")
     {
         return addTask(args);
+    }
+    if (action == "update_task_filters")
+    {
+        return updateTaskFilters(args);
     }
     if (action == "import_tasks")
     {

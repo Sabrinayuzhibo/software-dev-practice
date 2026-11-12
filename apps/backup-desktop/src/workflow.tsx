@@ -1,3 +1,4 @@
+import { FilterSummary } from './backup-filters'
 import { GlassButton } from './glass-controls'
 import { GlassInput } from './glass-fields'
 import {
@@ -99,6 +100,7 @@ export function WorkflowDialogs({ model }: { model: ConsoleModel }) {
                         types={removeCandidate.file_types}
                         preserveEmptyDirs={removeCandidate.preserve_empty_dirs}
                     />
+                    <FilterSummary filters={removeCandidate.filters} />
                     <p>只移除任务配置，源文件和已完成的备份版本都会保留。</p>
                     <div className="dialog-actions">
                         <GlassButton
@@ -147,6 +149,11 @@ export function WorkflowDialogs({ model }: { model: ConsoleModel }) {
                                     restoreCandidate.preserve_empty_dirs
                                 }
                             />
+                        </dd>
+                        <dt>筛选规则</dt>
+                        <dd>
+                            <FilterSummary filters={restoreCandidate.filters} />
+                            {!restoreCandidate.filters && '未设置'}
                         </dd>
                         <dt>备份内容</dt>
                         <dd>
@@ -274,6 +281,7 @@ export function OperationPanel({
                 types={detail.file_types}
                 preserveEmptyDirs={detail.preserve_empty_dirs}
             />
+            <FilterSummary filters={detail.filters} />
             {specialEntryCounts(detail) && (
                 <p className="muted">{specialEntryCounts(detail)}</p>
             )}

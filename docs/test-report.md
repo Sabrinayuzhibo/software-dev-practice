@@ -538,3 +538,79 @@ Windows 测试使用 Win32 `ShowWindowAsync` 和鼠标事件，经 WSLg 到 Elec
 将压缩接口、工厂、Huffman/LZ77 实现、相关测试及新增的配置兼容说明注释改为中文，保留标识符和错误消息。`.clang-format` 设置 `FixNamespaceComments: false`，防止格式化时将中文命名空间注释替换为英文。
 
 验证通过：9 个 C++ 文件去除注释后的词法序列一致；2 个 Python 文件去除文档字符串后的 AST 一致；桌面压缩测试去除注释后的 JavaScript 编译输出一致。C++ 格式检查、Prettier 检查及 `git diff --check` 通过。本次仅调整注释、文档字符串和格式选项，未重跑构建或功能测试。
+
+## 2026-11-02 六类自定义备份与虚函数规则接口
+
+执行者：Codex。按 FR-11、UC-08 和需求附录 B 补齐路径、类型、名字、修改时间、尺寸、UID 条件的新建、编辑、预览及历史快照。`IBackupFilter` 使用虚析构和纯虚 `category()` / `matches()`，六种实现由工厂创建，`SourceScope` 统一组合；扫描、上传、Server 条目校验及历史还原共用规则。注释使用中文。本轮未提交 Git。
+
+| 命令 / 验证项 | 实际结果 |
+| --- | --- |
+| `./scripts/build.sh` | C++ 编译链接完成；首轮 19 个 Meson 套件中 18 通过、1 失败、0 跳过。失败为 `backup-file-type-mounts`：设备新增 UID/mtime 元数据后，清单仍按旧条件拒绝设备元数据；已扩展格式 4/5 的元数据范围校验并补验通过。首轮压缩大文件套件通过，525.49 秒；普通流式套件通过，121.32 秒。没有将这次完整脚本记录为全绿 |
+| 加载 `scripts/qt-env.sh` 后 `ninja -C build` | 最终 C++ 编译及链接通过，未关闭警告选项，无新增编译警告。直接运行一次未加载 Qt 环境的 Ninja 曾因本地 libproxy 的间接依赖链接失败，加载项目环境后解决 |
+| `meson test -C build backup-filter-test backup-custom-filter backup-integration backup-type-filter backup-sources backup-file-type-mounts backup-file-types backup-compression --print-errorlogs` | 最后补齐空目录发布/还原校验后，8/8 通过，0 失败、0 跳过；耗时依次为单测 0.03、设备挂载 2.80、基础集成 6.48、类型筛选 7.79、来源选择 8.34、自定义筛选 10.88、文件类型 14.84、压缩集成 18.33 秒。未再次运行完整大文件套件 |
+| `backup-filter-test` | 直接通过基类指针执行六种实现；验证中文/换行文件名、大小写、`?`、路径通配不跨 `/`、目录子树、大小和时间闭区间、不同 UID 的同类或与排除优先、64 位尺寸、非路径目录排除及非法字段/数值/模式 |
+| `backup-custom-filter` | 比较扫描样本、实际 `entries.jsonl` 和还原树，逐项比较入选内容摘要或链接/FIFO 类型；验证路径/名称/类型/范围组合、空版本、显式选择的父目录排除、只选一个硬链接成员、草稿预览不保存且独立记录、非法规则与写配置失败保留旧状态、旧迁移接口拒绝夹带条件、重启、格式 7 不降级、压缩组合及历史规则不变 |
+| 空目录边界 | 符合条件的空目录及自身不匹配的结构父目录可备份还原；Server 拒绝只有不匹配空目录的提交。修改历史清单并重新生成有效摘要后，Agent 仍拒绝不匹配且没有入选后代的目录，在创建还原目标前失败 |
+| `backup-file-type-mounts` | 私有命名空间中真实字符/块设备元数据备份及原有跨设备边界通过；新增类型 + 实际 UID + mtime 单点闭区间组合，扫描与清单只包含指定字符节点，不生成 `.data`，不读取设备流 |
+| `npm run build --prefix apps/backup-desktop` | TypeScript 主进程、Renderer 及 Vite 构建通过；补齐新代码控制体花括号并格式化后再次构建通过 |
+| `npm run test:window --prefix apps/backup-desktop` | 完整窗口回归通过，含既有玻璃、窗口恢复、来源/类型、版本删除和压缩流程，以及新六类页签、创建、编辑、草稿预览、无效负尺寸禁用保存、取消保留旧值、重载、真实备份及还原。1120×760、850×600 均无横向溢出，底部操作可见。随后新增的空目录服务端校验由上面的 8 套件补验，未重新跑完整窗口回归 |
+| `npm run test:bridge --prefix apps/backup-desktop` | 超长响应、合并/分段响应、超时后迟到响应及后台工作存活检查通过 |
+| 格式及差异 | clang-format 18.1.8 检查新接口/实现、SourceScope、状态、遍历器、记录、Agent 入口及单测；Manifest/Server/还原只格式化本轮修改行，保留无关代码。Prettier 检查新界面、IPC 和桌面测试通过；Python 语法检查及 `git diff --check` 通过 |
+
+附录 B 的权限限制：当前账号 UID=1000，不能把 `sub/f.txt` 改属其他 UID。B-03、B-04、B-05、B-07、B-08、B-09 使用原预期验证；B-01/B-06 按 f.txt 的实际 UID 增加入选项，不能记为原附录配置完整通过。B-02 验证未出现 UID 的空结果，不代替 V 属主真文件的正向场景；不同 UID 的正向匹配、同类或、跨类且和排除由单测覆盖。设备挂载测试另验证实际设备属主值，但也不代替 B-02 普通文件样本。
+
+测试开发中，首次集成用例误用 `manifest.jsonl`，已改为实际 `entries.jsonl`；桌面专项首次启动遇到并行链接时 Server 尚未就绪，重启专项后进入用例，后续又修正了测试从错误字段取版本编号的问题。修正后专项和最终完整桌面回归均通过，未改应用来绕过这些测试错误。
+
+证据：`tests/backup_filter_test.cpp`、`tests/backup_custom_filter.py`、`tests/backup_file_type_mounts.py`、`tests/desktop_custom_filter.mjs`；本轮完整构建输出 `/tmp/backup-custom-filter-build.log`，最终八套件 `/tmp/backup-custom-filter-acceptance.log`，完整桌面 `/tmp/backup-custom-filter-window.log`。`build/meson-logs/testlog.txt` 可能被后续单项补验覆盖。截图为 `/tmp/backup-custom-filter-1120.png`、`/tmp/backup-custom-filter-850.png`，已查看窄窗截图确认内容滚动及操作区布局。
+
+边界：实时备份尚未实现，本轮不宣称覆盖实时触发链路；未验证百万条目规模、物理掉电及独立筛选场景的 ENOSPC。配置持久化故障通过把 `config.json` 替换为不可写入的目录注入，证明失败保留内存和旧文件，不等同于磁盘写满。历史版本按当次规则还原，不按当前任务条件重新筛选。
+
+## 2026-11-10 自定义备份混合目录实测（2026-11-12 收尾复核）
+
+执行者：Codex。按用户要求创建实际测试目录，使用独立 Agent 配置和 Server 仓库，逐项核对扫描、已提交清单和真实还原文件。没有使用日常备份配置。本轮未提交 Git。
+
+保留的证据目录为 `/home/jjj/course/cpp/backup-filter-acceptance-20261110-final`。其中 `source/` 含 32 个条目：多层目录、空目录、中文/空格/隐藏/换行名称、大小写扩展名、0/9/10/20/21 字节边界文件、1 MiB 二进制文件、不同修改时间、硬链接、文件/目录/悬空/循环软链接、FIFO 和作为应跳过样本的 socket。`source-inventory.json` 记录 UID、mtime、大小、模式、内容 SHA-256 或链接目标；`restored/` 保留逐用例还原目录；`results.json` 保留规则、预期、实际结果和版本 ID。
+
+| 命令 / 验证项 | 实际结果 |
+| --- | --- |
+| `./scripts/build.sh`（2026-11-10） | C++ 和桌面端构建成功；19/19 个 Meson 套件通过，0 失败、0 跳过、0 超时。包含自定义筛选、设备挂载、损坏/中断边界、版本删除以及大文件流式与压缩测试；压缩流式套件耗时 268.22 秒。日志已保留为证据目录中的 `full-build.log` |
+| 加载 `scripts/qt-env.sh` 后运行 `python3 tests/backup_filter_acceptance.py build/backup-agent build/backup-server /home/jjj/course/cpp/backup-filter-acceptance-20261110-final` | 33 组筛选场景全部通过：路径子树及通配符不跨目录、类型、名字/大小写/中文/隐藏名称、尺寸闭区间与单边/零尺寸、mtime 闭区间与单边、UID、同类或、跨类且、排除优先、目录剪枝、无匹配和只选空目录。逐例比较扫描中未跳过的条目、真实 `entries.jsonl`、实际还原树和文件摘要/链接目标/FIFO 类型；硬链接组另核对还原 inode |
+| Huffman / LZ77 与条件筛选组合 | 另外 2 组通过真实备份和还原核对；Agent 重启后保留已保存规则，旧版本仍按其历史规则还原 |
+| `unshare --user --map-root-user --mount python3 tests/backup_filter_acceptance.py build/backup-agent build/backup-server /home/jjj/course/cpp/backup-filter-owner-20261110 --ownership` | 3 组实际不同 UID 的普通文件通过：指定其他属主、两个 UID 或组合、排除其他属主。私有命名空间内本地文件 UID=0，只读绑定的宿主 root 文件显示为 UID=65534；没有改变宿主文件属主。绑定测试结束后卸载，结果保留在 `ownership-results.json` 和 `ownership.log`。此场景不等同于宿主机 UID=1001 的文件 |
+| 桌面专项 `checkCustomFilters`（2026-11-10；2026-11-12 再次执行收尾复核） | 复用完整窗口脚本的 Electron/CDP 启动与真实鼠标输入，仅运行自定义筛选专项。覆盖六类条件填写、创建、编辑、草稿预览不保存、重载持久化、取消不保存、真实备份还原、1120×760 / 850×600 布局。另覆盖跨页签空条件定位，以及 8 组非法路径、名字、尺寸、UID、时间范围，确认保存被禁用且修正后恢复。此次没有重新运行完整玻璃/窗口回归，不用专项结果代替完整窗口套件 |
+| `npm run test:bridge --prefix apps/backup-desktop` | 超长 UTF-8 响应、分帧与后续请求、后台工作存活验证通过；日志为 `bridge.log` |
+| 差异与语法 | `git diff --check`、新增 Python 脚本语法检查通过。自定义筛选组件、局部样式、桌面专项的 Prettier 检查通过 |
+
+本轮共 38 组明确列出的筛选/压缩用例通过，另有重启历史检查与 GUI 验证。2026-11-12 核对了保留的 JSON 结果及全部主目录还原目录；没有将旧日期的完整构建写成当天重新运行。
+
+实际发现及处理：
+
+- 截图中的红字来自其他页签中未填写的条件，原提示没有标明位置。已在自定义备份卡片内显示类别、选入/排除组、组内序号，并提供“定位条件”按钮。回归先复现原笼统提示的失败，再验证修复后能定位名字条件，删除后能定位剩余尺寸条件；记录为 `gui-error-before.log` 与 `gui-after.log`。
+- **原修改时间还原仍未实现。** mtime 用于筛选并正确保存在清单中，但本轮实际还原文件的修改时间是还原时刻。每个用例的 `restore_mtime_not_preserved` 保留差异；这项没有记为通过，不能宣称 FR-12 完整元数据还原已实现。本轮没有扩展修改后端元数据恢复流程。
+- 自定义“类型=普通文件”采用单链接普通文件语义，源端链接数大于 1 的文件属于“硬链接成员”；两种类型可同时添加。测试按该区分分别核对，未把硬链接成员的未入选误记为内容丢失。
+
+测试脚本开发时修正过两处预期：扫描样本包含带 `reason` 的已跳过 socket，不能将它计为入选文件；自定义类型中的普通文件与硬链接成员应分别计算。初次额外检查原 mtime 还原也失败，并按上面的实际未实现项记录，没有通过修改应用来掩盖。此前未完成的样本运行目录保留供诊断，最终结果以 `*-final` 为准。
+
+## 2026-11-12 扫描预览改为可折叠目录树
+
+执行者：Codex。按用户要求，仅调整扫描文件明细的展示：目录先于文件排列，默认展开第一层，子目录可分别展开/收起，支持全部展开/全部收起；名称列显示基本名称，悬停查看完整相对路径。保留类型、大小、SHA-256、链接目标、硬链接同组路径和设备号；统计、警告与扫描/备份选择逻辑未修改。
+
+树由现有 `sample` 构建。缺失的父目录以“路径层级”标注，不增加统计。目录中没有返回的子项时显示“此目录没有预览子项”，不据此认定目录为空。说明中明确目录树只包含预览条目；本轮没有扩展后端预览分页，也没有把有限样本宣称为完整文件浏览器。软链接保持叶条目，不读取或展开其目标。
+
+| 命令 / 验证项 | 实际结果 |
+| --- | --- |
+| `npm run build --prefix apps/backup-desktop` | TypeScript 主进程、Renderer 和 Vite 构建通过 |
+| `node tests/scan_tree_test.mjs` | 父目录晚于子项、缺失父目录、目录优先及自然数字排序、层级折叠、元数据保留、软链接叶条目、`__proto__` 路径、空样本及 1500 层路径通过；迭代遍历无递归栈溢出，未修改输入顺序 |
+| 真实窗口专项 `checkScanTree` | 创建包含多层目录、三个同名 `a.txt`、空目录、中文长名称和目录软链接的真实样本；实际扫描后验证逐层展开、父目录收起后子状态保留、全部展开/收起、SHA-256 完整值、重新扫描重置、软链接不展开，1120×760 和 850×600 无横向溢出 |
+| 文件类型与自定义类型筛选窗口专项 | 与目录树专项同一真实窗口继续运行 `checkFileTypes` 和 `checkTypeFilter`，实际备份/还原、硬链接 inode、FIFO、规则持久化、直接选择类型不匹配及无匹配场景通过；原扁平路径断言改为读取行的完整 `data-path` |
+| 格式与差异 | 新树模型、树表格组件、局部 CSS、相关测试的 Prettier 检查和 `git diff --check` 通过 |
+
+此次没有修改 C++ 逻辑，没有重新运行完整后端套件。以上专项由临时脚本复用 `desktop_window_smoke.mjs` 的启动、CDP 点击及清理代码；`checkScanTree` 已接入完整窗口回归。专项日志和两种窗口截图保留在 `/home/jjj/course/cpp/backup-scan-tree-20261112/`。
+
+接入时的回归问题：前两次完整窗口运行均在警告第一页加载处超时。最小复现确认平铺表格可加载，目录树版本中原生 `toggle` 事件也已触发，因此不是鼠标未点中。原因是 `WarningDetails` 与新增的 `ScanTreeTable` 两个相邻组件使用相同的执行 ID 作为 key，造成更新关联异常；已给目录树增加独立的 key 前缀，警告组件本身未修改。201 条警告的独立复现随后通过，新的目录树用例也加入实际 socket 跳过警告自动加载检查。
+
+修复后执行 `npm run test:window --prefix apps/backup-desktop`：完整窗口回归通过（进程退出码 0），包含玻璃/窗口恢复、扫描警告 100 条分页、执行记录、备份还原、来源与类型选择、单版删除、Huffman/LZ77、自定义筛选，以及新增目录树与警告独立更新用例。最终日志为上述证据目录中的 `window-passed.log`；先前失败日志保留为 `window-first.log`、`window-second.log`。临时专项脚本已移除。
+
+## 2026-11-12 硬链接关系说明文案
+
+扫描目录树中的“同组文件：”改为“与此文件共享数据：”，同步更新现有桌面文件类型测试的文案预期。只修改显示文字，硬链接识别和存储还原逻辑保持原样。`npm run build --prefix apps/backup-desktop` 和 `git diff --check` 通过；未重复运行功能或完整窗口测试。

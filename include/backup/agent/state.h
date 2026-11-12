@@ -31,6 +31,8 @@ class State
   private:
     void save(const QJsonObject& next);
     QJsonObject addTask(const QJsonObject& args);
+    // 只替换已存在任务的六类规则；校验或持久化失败时保留原配置。
+    QJsonObject updateTaskFilters(const QJsonObject& args);
     QJsonObject importTasks(const QJsonArray& tasks);
     void compactOperationWarnings() const;
     QString directory_;

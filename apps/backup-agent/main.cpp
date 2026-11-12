@@ -142,6 +142,7 @@ class CommandReader final : public QObject
                       backup::agent::restoreEntries(state_.directory(), args));
             }
             else if (action == "add_task" || action == "remove_task" ||
+                     action == "update_task_filters" ||
                      action == "save_target" || action == "import_tasks")
             {
                 require(!busy_ || action == "save_target",
@@ -206,6 +207,13 @@ class CommandReader final : public QObject
     void start(const QString& requestId, QString action, QJsonObject args)
     {
         require(!busy_, "Agent is busy");
+        const bool filterPreview = action == "start_filter_preview";
+        if (filterPreview)
+        {
+            require(args.value("filters").isObject(), "Invalid custom filters");
+            action = "start_scan";
+        }
+        const auto previewFilters = args.value("filters");
         const bool asynchronous = action.startsWith("start_");
         if (asynchronous)
         {
@@ -260,6 +268,13 @@ class CommandReader final : public QObject
             }
             args.insert("target_id", task.value("target_id"));
         }
+        if (filterPreview)
+        {
+            require(!task.isEmpty(),
+                    "Filter preview requires an existing task");
+            args.insert("filters", previewFilters);
+            const SourceScope checked(args);
+        }
         auto target = args.contains("target_id")
                           ? state_.target(text(args, "target_id"))
                           : args;
@@ -295,18 +310,19 @@ class CommandReader final : public QObject
         const QString stateDirectory = state_.directory();
         const bool recorded = action == "scan" || action == "backup" ||
                               action == "restore" || action == "delete_version";
-        QJsonObject record{{"id", newId()},
-                           {"action", action},
-                           {"state", "RUNNING"},
-                           {"started_at", now()},
-                           {"stage", "prepare"},
-                           {"files", 0},
-                           {"bytes", 0},
-                           {"task_id", args.value("task_id")},
-                           {"target", target},
-                           {"source", args.value("path")},
-                           {"destination", args.value("destination")},
-                           {"version_id", args.value("version_id")}};
+        QJsonObject record{
+            {"id", newId()},
+            {"action", filterPreview ? "filter_preview" : action},
+            {"state", "RUNNING"},
+            {"started_at", now()},
+            {"stage", "prepare"},
+            {"files", 0},
+            {"bytes", 0},
+            {"task_id", args.value("task_id")},
+            {"target", target},
+            {"source", args.value("path")},
+            {"destination", args.value("destination")},
+            {"version_id", args.value("version_id")}};
         if (args.contains("selection"))
         {
             record.insert("selection", args.value("selection"));

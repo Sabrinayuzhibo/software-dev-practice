@@ -142,7 +142,7 @@ export async function checkTypeFilter({ page, main, click, until, temporary }) {
         'filtered folder scan',
     )
     const preview = await page.evaluate(
-        `[...document.querySelectorAll(${JSON.stringify(card + ' .scan-table tbody tr')})].map(row => [row.dataset.type, row.querySelector('td').textContent])`,
+        `[...document.querySelectorAll(${JSON.stringify(card + ' .scan-table tbody tr')})].map(row => [row.dataset.type, row.dataset.path])`,
     )
     assert.deepEqual(preview, [
         ['directory', 'nested'],
@@ -350,10 +350,7 @@ export async function checkTypeFilter({ page, main, click, until, temporary }) {
     await page.call('Input.insertText', { text: socketPath })
     await click('[aria-label="添加路径"]')
     await until(
-        () =>
-            page.evaluate(
-                "!!document.querySelector('dialog [role=alert]')",
-            ),
+        () => page.evaluate("!!document.querySelector('dialog [role=alert]')"),
         'direct socket rejected',
     )
     assert(

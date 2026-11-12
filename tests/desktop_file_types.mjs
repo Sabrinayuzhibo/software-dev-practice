@@ -60,7 +60,7 @@ export async function checkFileTypes({ page, main, click, until, temporary }) {
         '1 个硬链接',
         '1 个命名管道',
         '指向：payload file.txt',
-        '同组文件：',
+        '与此文件共享数据：',
     ]) {
         assert(preview.text.includes(text), text)
     }

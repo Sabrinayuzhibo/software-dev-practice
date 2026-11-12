@@ -11,6 +11,7 @@ import {
 import { useEffect, useState } from 'react'
 import type { ScanResult } from './types'
 import { WarningDetails } from './warning-details'
+import { ScanTreeTable } from './scan-tree-table'
 
 export const stateLabels: Record<string, string> = {
     RUNNING: '执行中',
@@ -22,6 +23,7 @@ export const stateLabels: Record<string, string> = {
 }
 export const actionLabels: Record<string, string> = {
     scan: '扫描',
+    filter_preview: '筛选预览',
     backup: '备份',
     restore: '还原',
     delete_version: '删除版本',
@@ -239,84 +241,12 @@ export function ScanPreview({
                 />
             )}
             {expanded && (
-                <>
-                    <div className="table-scroll">
-                        <table className="scan-table">
-                            <thead>
-                                <tr>
-                                    <th>路径</th>
-                                    <th>类型</th>
-                                    <th>大小</th>
-                                    <th>内容校验值</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {result.sample.map((file) => (
-                                    <tr
-                                        key={file.path}
-                                        data-type={file.type || 'file'}
-                                    >
-                                        <td>
-                                            {file.path}
-                                            {file.link_target !== undefined && (
-                                                <small>
-                                                    指向：{file.link_target}
-                                                </small>
-                                            )}
-                                            {file.link_to && (
-                                                <small>
-                                                    同组文件：{file.link_to}
-                                                </small>
-                                            )}
-                                            {file.device_major !== undefined &&
-                                                file.device_minor !==
-                                                    undefined && (
-                                                    <small>
-                                                        设备号：
-                                                        {file.device_major}:
-                                                        {file.device_minor}
-                                                    </small>
-                                                )}
-                                        </td>
-                                        <td>
-                                            {entryTypeLabels[
-                                                file.type || 'file'
-                                            ] || '未知类型'}
-                                        </td>
-                                        <td>
-                                            {file.size === undefined
-                                                ? '-'
-                                                : formatBytes(file.size)}
-                                        </td>
-                                        <td className="digest">
-                                            {file.sha256 ? (
-                                                <>
-                                                    <span
-                                                        className="digest-short"
-                                                        title={`SHA-256: ${file.sha256}`}
-                                                    >
-                                                        {file.sha256}
-                                                    </span>
-                                                    <details className="digest-details">
-                                                        <summary>
-                                                            SHA-256
-                                                        </summary>
-                                                        <code>
-                                                            {file.sha256}
-                                                        </code>
-                                                    </details>
-                                                </>
-                                            ) : (
-                                                '-'
-                                            )}
-                                        </td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                    </div>
-                    <p className="muted">显示 {result.sample.length} 个条目</p>
-                </>
+                <ScanTreeTable
+                    key={`tree-${operationId}`}
+                    result={result}
+                    typeLabels={entryTypeLabels}
+                    formatSize={formatBytes}
+                />
             )}
         </section>
     )

@@ -55,6 +55,7 @@ class Repository
     QJsonObject summary_;
     QJsonObject currentEntry_;
     core::Manifest entries_;
+    QSet<QString> allowedEmptyDirectories_;
     std::optional<core::SourceScope> source_;
     QFile manifest_;
     QFile content_;

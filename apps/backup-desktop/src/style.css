@@ -518,6 +518,55 @@ td.digest {
 .scan-table th:last-child {
     width: 30%;
 }
+.scan-tree-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 16px;
+    color: #607789;
+    font-size: 12px;
+}
+.scan-tree-toolbar > div {
+    display: flex;
+    gap: 6px;
+}
+.scan-tree-toolbar button {
+    min-height: 28px;
+    padding: 4px 8px;
+    font-size: 12px;
+}
+.scan-tree-name {
+    display: flex;
+    align-items: flex-start;
+    gap: 5px;
+    min-width: 0;
+}
+.scan-tree-name > svg {
+    flex: none;
+    margin-top: 3px;
+}
+.scan-tree-name > span:last-child {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+.scan-directory-toggle,
+.scan-tree-spacer {
+    flex: none;
+    width: 20px;
+    height: 22px;
+}
+.scan-directory-toggle {
+    padding: 0;
+    min-height: 0;
+    border: 0;
+    background: transparent;
+    color: #607789;
+}
+.scan-tree-note {
+    overflow-wrap: anywhere;
+}
 .versions-table th:last-child,
 .versions-table td:last-child {
     width: 128px;
@@ -632,6 +681,184 @@ td.digest {
     overflow: auto;
     margin-inline: -13px;
     padding: 2px 13px 12px;
+}
+.filter-editor {
+    min-width: 0;
+    padding: 16px;
+    border: 1px solid #d4dfdf;
+    border-radius: 8px;
+    background: #f8fbfc;
+}
+.filter-editor .filter-editor-heading,
+.filter-editor .filter-group-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+.filter-editor h3,
+.filter-editor h4 {
+    margin: 0;
+    font-size: 14px;
+}
+.filter-editor h4 {
+    font-size: 13px;
+    font-weight: 500;
+}
+.filter-editor .filter-count,
+.filter-editor .filter-intro,
+.filter-editor .filter-help,
+.filter-editor .filter-empty,
+.filter-editor .filter-error {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 8px 0;
+}
+.filter-editor .filter-error p {
+    flex: 1 1 260px;
+    margin: 0;
+}
+.filter-editor .locate-filter-error {
+    font-size: 12px;
+    color: #2463a0;
+}
+.filter-editor .filter-guidance {
+    color: #607789;
+    font-size: 12px;
+}
+.filter-editor .filter-intro {
+    margin: 6px 0 16px;
+}
+.filter-editor .filter-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    padding: 4px;
+    border: 1px solid #dce5e9;
+    border-radius: 7px;
+    background: #edf3f6;
+}
+.filter-editor button,
+.filter-editor input,
+.filter-editor select {
+    min-width: 0;
+    max-width: 100%;
+    padding: 7px 9px;
+    border: 1px solid #c7d4da;
+    border-radius: 5px;
+    background: white;
+    color: inherit;
+    font: inherit;
+}
+.filter-editor .filter-tabs button {
+    flex: 1 1 64px;
+    border-color: transparent;
+    background: transparent;
+}
+.filter-editor .filter-tabs [aria-selected='true'] {
+    color: #2463a0;
+    background: white;
+    border-color: #cfdeeb;
+    font-weight: 600;
+}
+.filter-editor .filter-tab-count {
+    padding: 1px 5px;
+    border-radius: 4px;
+    background: #e4edf6;
+    font-size: 11px;
+}
+.filter-editor .filter-help {
+    margin: 12px 0;
+    line-height: 1.7;
+}
+.filter-editor fieldset {
+    min-width: 0;
+    margin: 0;
+    padding: 12px 0;
+    border: 0;
+    border-top: 1px solid #e0e7ec;
+}
+.filter-editor .filter-group-heading button {
+    min-height: 28px;
+    padding: 4px 8px;
+    color: #2463a0;
+    font-size: 12px;
+}
+.filter-editor .filter-empty {
+    margin: 6px 0 0;
+}
+.filter-editor .filter-rule {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: end;
+    margin-top: 10px;
+}
+.filter-editor .filter-rule > input,
+.filter-editor .filter-rule > select,
+.filter-editor .filter-rule > label {
+    flex: 1 1 160px;
+    min-width: 0;
+}
+.filter-editor .filter-rule label {
+    font-size: 12px;
+    color: #607789;
+}
+.filter-editor .filter-rule label input {
+    display: block;
+    width: 100%;
+    margin-top: 5px;
+    box-sizing: border-box;
+}
+.filter-editor .remove-filter {
+    width: 32px;
+    height: 34px;
+    padding: 0;
+    color: #6b7e8a;
+}
+.filter-editor .filter-guidance {
+    padding-top: 10px;
+    border-top: 1px solid #e0e7ec;
+}
+.filter-editor .filter-guidance summary {
+    color: #607789;
+    cursor: pointer;
+}
+.filter-editor .filter-guidance p {
+    margin: 8px 0;
+}
+.filter-editor .filter-summary {
+    margin-top: 10px;
+}
+.filter-summary {
+    overflow-wrap: anywhere;
+    font-size: 12px;
+}
+.filter-summary small {
+    display: block;
+}
+.workflow-dialog:has(.filter-dialog-body) {
+    width: min(760px, calc(100vw - 40px));
+}
+.workflow-dialog:has(.filter-dialog-body) .workflow-dialog-content {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+.filter-dialog-body {
+    min-height: 0;
+    overflow: auto;
+}
+.filter-dialog-body + .dialog-actions {
+    flex-shrink: 0;
+    padding-top: 12px;
+}
+.filter-preview ul {
+    max-height: 160px;
+    overflow: auto;
 }
 .create-task-body > * {
     flex-shrink: 0;

@@ -5,96 +5,11 @@
 #include <QDir>
 #include <QFileInfo>
 #include <QJsonDocument>
-#include <QRegularExpression>
 #include <QSet>
+#include <array>
 
 namespace backup::core
 {
-namespace
-{
-QString wildcardExpression(const QString& pattern, bool path)
-{
-    QString result = "^";
-    for (const auto character : pattern)
-    {
-        if (character == '*')
-        {
-            result += path ? "[^/]*" : ".*";
-        }
-        else if (character == '?')
-        {
-            result += path ? "[^/]" : ".";
-        }
-        else
-        {
-            result += QRegularExpression::escape(QString(character));
-        }
-    }
-    result += '$';
-    return result;
-}
-
-bool ruleMatches(const QJsonObject& rule, const QString& path,
-                 const QString& type, qint64 size, qint64 uid,
-                 qint64 mtimeSeconds)
-{
-    const auto category = text(rule, "category");
-    if (category == "path")
-    {
-        return QRegularExpression(wildcardExpression(text(rule, "pattern"),
-                                                     true))
-            .match(path)
-            .hasMatch();
-    }
-    if (category == "name")
-    {
-        const auto name = path.section('/', -1);
-        return QRegularExpression(wildcardExpression(text(rule, "pattern"),
-                                                     false))
-            .match(name)
-            .hasMatch();
-    }
-    if (category == "type")
-    {
-        return text(rule, "value") == type;
-    }
-    if (category == "user")
-    {
-        return number(rule, "value") == uid;
-    }
-    if (category == "mtime" || category == "size")
-    {
-        if (category == "size" && type != "file" && type != "hardlink")
-        {
-            return false;
-        }
-        const auto value = category == "size" ? size : mtimeSeconds;
-        if (rule.contains("min"))
-        {
-            const auto minimum = category == "size"
-                                     ? number(rule, "min")
-                                     : signedNumber(rule, "min");
-            if (value < minimum)
-            {
-                return false;
-            }
-        }
-        if (rule.contains("max"))
-        {
-            const auto maximum = category == "size"
-                                     ? number(rule, "max")
-                                     : signedNumber(rule, "max");
-            if (value > maximum)
-            {
-                return false;
-            }
-        }
-        return true;
-    }
-    return false;
-}
-} // namespace
-
 SourceScope::SourceScope(const QJsonObject& value, const char* field)
     : root_(text(value, field))
 {
@@ -112,7 +27,8 @@ SourceScope::SourceScope(const QJsonObject& value, const char* field)
     }
     if (value.contains("file_types"))
     {
-        require(value.value("file_types").isArray(), "Invalid file type filter");
+        require(value.value("file_types").isArray(),
+                "Invalid file type filter");
         const auto requested = value.value("file_types").toArray();
         require(!requested.isEmpty() &&
                     requested.size() <= (hasEmptyDirectoryRule_ ? 6 : 7),
@@ -122,8 +38,7 @@ SourceScope::SourceScope(const QJsonObject& value, const char* field)
         {
             require(item.isString() &&
                         (item == "file" || item == "symlink" ||
-                         item == "fifo" ||
-                         item == "character_device" ||
+                         item == "fifo" || item == "character_device" ||
                          item == "block_device" || item == "socket" ||
                          (!hasEmptyDirectoryRule_ && item == "directory")) &&
                         !unique.contains(item.toString()),
@@ -136,9 +51,9 @@ SourceScope::SourceScope(const QJsonObject& value, const char* field)
             unique.contains("symlink") && unique.contains("fifo");
         if (!legacyAll)
         {
-            for (const auto* type : {"file", "directory", "symlink", "fifo",
-                                     "character_device", "block_device",
-                                     "socket"})
+            for (const auto* type :
+                 {"file", "directory", "symlink", "fifo", "character_device",
+                  "block_device", "socket"})
             {
                 if (unique.contains(QLatin1String(type)))
                 {
@@ -164,88 +79,33 @@ SourceScope::SourceScope(const QJsonObject& value, const char* field)
     {
         require(value.value("filters").isObject(), "Invalid custom filters");
         filters_ = value.value("filters").toObject();
-        const QSet<QString> categories{"path", "type", "name", "mtime",
-                                       "size", "user"};
+        require(QJsonDocument(filters_).toJson(QJsonDocument::Compact).size() <=
+                    kSourceScopeBytes,
+                "Custom filters exceed supported size");
         for (const auto* polarity : {"include", "exclude"})
         {
             const auto rules = filters_.value(QLatin1String(polarity));
             require(rules.isArray() && rules.toArray().size() <= 100,
                     "Invalid custom filter list");
+            auto& compiled =
+                polarity[0] == 'i' ? includeFilters_ : excludeFilters_;
             for (const auto& value : rules.toArray())
             {
                 require(value.isObject(), "Invalid custom filter rule");
-                const auto rule = value.toObject();
-                const auto category = text(rule, "category");
-                require(categories.contains(category),
-                        "Unsupported custom filter category");
-                if (category == "path" || category == "name")
-                {
-                    const auto pattern = text(rule, "pattern");
-                    require(pattern.size() <= 512 &&
-                                (!pattern.startsWith('/') &&
-                                 !pattern.contains(QChar(0))),
-                            "Invalid custom filter pattern");
-                    if (category == "path")
-                    {
-                        for (const auto& component : pattern.split('/'))
-                        {
-                            require(component != ".." && component != ".",
-                                    "Invalid custom path filter");
-                        }
-                    }
-                }
-                else if (category == "type")
-                {
-                    const auto type = text(rule, "value");
-                    require(supportedEntryType(type) && type != "unknown",
-                            "Invalid custom type filter");
-                }
-                else if (category == "user")
-                {
-                    number(rule, "value");
-                    require(number(rule, "value") <=
-                                std::numeric_limits<uid_t>::max(),
-                            "Invalid custom UID filter");
-                }
-                else
-                {
-                    require(rule.contains("min") || rule.contains("max"),
-                            "Custom range needs a boundary");
-                    if (category == "size")
-                    {
-                        if (rule.contains("min"))
-                        {
-                            number(rule, "min");
-                        }
-                        if (rule.contains("max"))
-                        {
-                            number(rule, "max");
-                        }
-                    }
-                    else
-                    {
-                        if (rule.contains("min"))
-                        {
-                            signedNumber(rule, "min");
-                        }
-                        if (rule.contains("max"))
-                        {
-                            signedNumber(rule, "max");
-                        }
-                    }
-                    require(!rule.contains("min") || !rule.contains("max") ||
-                                (category == "size"
-                                     ? number(rule, "min") <=
-                                           number(rule, "max")
-                                     : signedNumber(rule, "min") <=
-                                           signedNumber(rule, "max")),
-                            "Invalid custom filter range");
-                }
+                compiled.push_back(makeBackupFilter(value.toObject()));
             }
         }
         require(filters_.size() == 2 && filters_.contains("include") &&
                     filters_.contains("exclude"),
                 "Invalid custom filter fields");
+    }
+    if (value.contains("rules"))
+    {
+        const auto rules = value.value("rules").toObject();
+        require((!value.contains("filters") && !rules.contains("filters")) ||
+                    (rules.value("filters").isObject() &&
+                     rules.value("filters").toObject() == filters_),
+                "Saved custom rules do not match version");
     }
     if (!value.contains("selection"))
     {
@@ -330,31 +190,30 @@ bool SourceScope::hasFilters() const
 bool SourceScope::matches(const QString& path, const QString& type, qint64 size,
                           qint64 uid, qint64 mtimeSeconds) const
 {
-    const auto includes = filters_.value("include").toArray();
-    QHash<QString, bool> matchedCategories;
-    QHash<QString, bool> requiredCategories;
-    for (const auto& value : includes)
+    const FilterEntry entry{path, type, size, uid, mtimeSeconds};
+    std::array<bool, static_cast<size_t>(FilterCategory::Count)> required{};
+    std::array<bool, static_cast<size_t>(FilterCategory::Count)> matched{};
+    for (const auto& filter : includeFilters_)
     {
-        const auto rule = value.toObject();
-        const auto category = text(rule, "category");
-        requiredCategories.insert(category, true);
-        if (ruleMatches(rule, path, type, size, uid, mtimeSeconds))
+        // 目录没有内容尺寸，不参与大小类别的选入判断。
+        if (type == "directory" && filter->category() == FilterCategory::Size)
         {
-            matchedCategories.insert(category, true);
+            continue;
         }
+        const auto category = static_cast<size_t>(filter->category());
+        required[category] = true;
+        matched[category] = matched[category] || filter->matches(entry);
     }
-    for (auto item = requiredCategories.begin();
-         item != requiredCategories.end(); ++item)
+    for (size_t category = 0; category < required.size(); ++category)
     {
-        if (!matchedCategories.value(item.key()))
+        if (required[category] && !matched[category])
         {
             return false;
         }
     }
-    for (const auto& value : filters_.value("exclude").toArray())
+    for (const auto& filter : excludeFilters_)
     {
-        if (ruleMatches(value.toObject(), path, type, size, uid,
-                        mtimeSeconds))
+        if (filter->matches(entry))
         {
             return false;
         }
@@ -363,13 +222,12 @@ bool SourceScope::matches(const QString& path, const QString& type, qint64 size,
 }
 
 bool SourceScope::excludesDirectorySubtree(const QString& path, qint64 uid,
-                                          qint64 mtimeSeconds) const
+                                           qint64 mtimeSeconds) const
 {
-    for (const auto& value : filters_.value("exclude").toArray())
+    const FilterEntry entry{path, "directory", 0, uid, mtimeSeconds};
+    for (const auto& filter : excludeFilters_)
     {
-        const auto rule = value.toObject();
-        if (text(rule, "category") != "size" &&
-            ruleMatches(rule, path, "directory", 0, uid, mtimeSeconds))
+        if (filter->matches(entry))
         {
             return true;
         }
@@ -410,26 +268,24 @@ bool SourceScope::allows(const QJsonObject& entry) const
     {
         return true;
     }
+    require(entry.contains("uid") && entry.contains("mtime_sec"),
+            "Custom filters require source metadata: " + path);
     if (type == "directory")
     {
         return !excludesDirectorySubtree(
             path, entry.contains("uid") ? number(entry, "uid") : 0,
-            entry.contains("mtime_sec")
-                ? signedNumber(entry, "mtime_sec")
-                : 0);
+            entry.contains("mtime_sec") ? signedNumber(entry, "mtime_sec") : 0);
     }
     auto ruleType = type;
     if (type == "file" && entry.contains("link_group"))
     {
         ruleType = "hardlink";
     }
-    const auto size = (type == "file" || type == "hardlink")
-                          ? number(entry, "size")
-                          : 0;
+    const auto size =
+        (type == "file" || type == "hardlink") ? number(entry, "size") : 0;
     const auto uid = entry.contains("uid") ? number(entry, "uid") : 0;
-    const auto mtime = entry.contains("mtime_sec")
-                           ? signedNumber(entry, "mtime_sec")
-                           : 0;
+    const auto mtime =
+        entry.contains("mtime_sec") ? signedNumber(entry, "mtime_sec") : 0;
     return matches(path, ruleType, size, uid, mtime);
 }
 
@@ -467,7 +323,7 @@ QJsonObject SourceScope::json(const char* field) const
     {
         result.insert("preserve_empty_dirs", preserveEmptyDirectories_);
     }
-    if (!filters_.isEmpty())
+    if (hasFilters())
     {
         result.insert("filters", filters_);
     }

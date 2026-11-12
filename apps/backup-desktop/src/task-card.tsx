@@ -1,6 +1,7 @@
 import { GlassButton } from './glass-controls'
 import {
     Archive,
+    SlidersHorizontal,
     File,
     Files,
     Folder,
@@ -9,6 +10,9 @@ import {
     Trash2,
     Upload,
 } from 'lucide-react'
+import { useState } from 'react'
+import { EditFiltersDialog } from './edit-filters-dialog'
+import { FilterSummary } from './backup-filters'
 import type { BackupTask } from './types'
 import type { ConsoleModel } from './use-backup-console'
 import { ScanPreview, formatBytes, formatTime, stateLabels } from './ui'
@@ -25,6 +29,7 @@ export function TaskCard({
     task: BackupTask
     model: ConsoleModel
 }) {
+    const [editingFilters, setEditingFilters] = useState(false)
     const { records, scans, backups, busy, connection } = model
     const scan = scans[task.id]
     const preparing = model.preparingScanId === task.id
@@ -75,6 +80,7 @@ export function TaskCard({
                         types={task.file_types}
                         preserveEmptyDirs={task.preserve_empty_dirs}
                     />
+                    <FilterSummary filters={task.filters} />
                     <SourceDetails
                         root={task.path}
                         selection={task.selection}
@@ -86,6 +92,15 @@ export function TaskCard({
                     </small>
                 </div>
                 <div className="task-actions">
+                    <GlassButton
+                        className="icon-button edit-task-filters"
+                        title="自定义备份筛选"
+                        aria-label="自定义备份筛选"
+                        disabled={busy}
+                        onClick={() => setEditingFilters(true)}
+                    >
+                        <SlidersHorizontal size={17} />
+                    </GlassButton>
                     <GlassButton
                         className="scan-button"
                         disabled={busy}
@@ -143,6 +158,13 @@ export function TaskCard({
                     </GlassButton>
                 </div>
             </header>
+            {editingFilters && (
+                <EditFiltersDialog
+                    task={task}
+                    model={model}
+                    onClose={() => setEditingFilters(false)}
+                />
+            )}
             {preparingBackup && (
                 <div className="task-backup-status" role="status">
                     <RefreshCw className="spinning" size={16} />

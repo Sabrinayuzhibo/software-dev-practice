@@ -27,8 +27,10 @@ class Manifest
     QJsonObject totals() const;
     qint64 count() const;
     bool contains(const QString& path) const;
-    // Require every stored directory to lead to an included non-directory.
-    void requirePopulatedDirectories() const;
+    // 每个目录必须包含入选条目；allowedEmpty 中的目录允许为空，
+    // 并可为其补齐必要的结构父目录。不符合要求时抛出 Error。
+    void
+    requirePopulatedDirectories(const QSet<QString>& allowedEmpty = {}) const;
 
   private:
     QSet<QString> paths_;

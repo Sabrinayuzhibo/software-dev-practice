@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type {
     BackupTask,
+    BackupFilters,
     Configuration,
     ContentFileType,
     Operation,
@@ -385,6 +386,7 @@ export function useBackupConsole() {
             selection: task?.selection,
             file_types: task?.file_types,
             preserve_empty_dirs: task?.preserve_empty_dirs,
+            filters: task?.filters,
         })
         setPreparingScanId(null)
     }
@@ -409,6 +411,7 @@ export function useBackupConsole() {
             selection: task?.selection,
             file_types: task?.file_types,
             preserve_empty_dirs: task?.preserve_empty_dirs,
+            filters: task?.filters,
         })
         setPreparingBackupId(null)
     }
@@ -425,6 +428,7 @@ export function useBackupConsole() {
             | 'selection'
             | 'file_types'
             | 'preserve_empty_dirs'
+            | 'filters'
             | 'source_name'
         > & { version_id?: string; target?: Target },
     ) {
@@ -479,6 +483,7 @@ export function useBackupConsole() {
         name: string,
         fileTypes: ContentFileType[],
         preserveEmptyDirs: boolean,
+        filters?: BackupFilters,
     ) {
         setMutating(true)
         setMessage('')
@@ -489,6 +494,7 @@ export function useBackupConsole() {
                 name,
                 fileTypes,
                 preserveEmptyDirs,
+                filters,
             )
             const existing = config.tasks.some((item) => item.id === created.id)
             setConfig(await window.backup.getConfig())
@@ -500,6 +506,18 @@ export function useBackupConsole() {
                     ? '相同备份范围的任务已存在，已保留原任务。'
                     : '备份任务已创建',
             )
+        } finally {
+            setMutating(false)
+        }
+    }
+
+    async function updateTaskFilters(id: string, filters: BackupFilters) {
+        setMutating(true)
+        try {
+            await window.backup.updateTaskFilters(id, filters)
+            setConfig(await window.backup.getConfig())
+            clearScan(id)
+            setMessage('筛选规则已保存，仅影响后续扫描和备份。')
         } finally {
             setMutating(false)
         }
@@ -783,6 +801,7 @@ export function useBackupConsole() {
         loadRecords,
         loadVersions,
         createTask,
+        updateTaskFilters,
         removeTask,
         saveTarget,
         showRecord,

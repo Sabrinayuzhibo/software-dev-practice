@@ -217,15 +217,39 @@ QJsonObject operationSummary(const QJsonObject& record)
 {
     const auto detail = operationDetail(record);
     QJsonObject summary;
-    for (const auto* key :
-         {"id",          "action",          "state",         "started_at",
-          "finished_at", "stage",           "files",         "bytes",
-          "directories", "task_id",         "target",        "source",
-          "selection",   "file_types",      "preserve_empty_dirs", "source_name",   "destination",   "path",
-          "error",       "version_id",      "warning_count", "error_count",
-          "complete",    "restore_journal", "symlinks",      "hardlinks",
-          "fifos",       "character_devices", "block_devices", "sockets",
-          "stored_bytes", "entries"})
+    for (const auto* key : {"id",
+                            "action",
+                            "state",
+                            "started_at",
+                            "finished_at",
+                            "stage",
+                            "files",
+                            "bytes",
+                            "directories",
+                            "task_id",
+                            "target",
+                            "source",
+                            "selection",
+                            "file_types",
+                            "preserve_empty_dirs",
+                            "filters",
+                            "source_name",
+                            "destination",
+                            "path",
+                            "error",
+                            "version_id",
+                            "warning_count",
+                            "error_count",
+                            "complete",
+                            "restore_journal",
+                            "symlinks",
+                            "hardlinks",
+                            "fifos",
+                            "character_devices",
+                            "block_devices",
+                            "sockets",
+                            "stored_bytes",
+                            "entries"})
     {
         if (detail.contains(QLatin1String(key)))
         {

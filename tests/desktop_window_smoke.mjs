@@ -25,6 +25,8 @@ import { checkGlassControls } from './desktop_controls.mjs'
 import { checkGlassFields } from './desktop_glass_fields.mjs'
 import { checkVersionDeletion } from './desktop_version_deletion.mjs'
 import { checkCompression } from './desktop_compression.mjs'
+import { checkCustomFilters } from './desktop_custom_filter.mjs'
+import { checkScanTree } from './desktop_scan_tree.mjs'
 
 const root = fileURLToPath(new URL('../', import.meta.url))
 const execute = promisify(execFile)
@@ -1386,6 +1388,8 @@ try {
     await checkTypeFilter({ page, main, click, until, temporary })
     await checkVersionDeletion({ page, main, click, until, temporary })
     await checkCompression({ page, main, click, until, temporary })
+    await checkCustomFilters({ page, main, click, until, temporary })
+    await checkScanTree({ page, main, click, until, temporary })
     await page.evaluate(`
     globalThis.windowTestClicks = [];
     document.addEventListener('click', event => {
@@ -1447,7 +1451,8 @@ try {
                 `({ visibility: document.visibilityState, focused: document.hasFocus(),
                     dialog: document.querySelector('dialog[open]')?.textContent,
                     operation: document.querySelector('.operation-panel')?.textContent,
-                    message: document.querySelector('.message-banner')?.textContent })`,
+                    message: document.querySelector('.message-banner')?.textContent,
+                    warnings: [...document.querySelectorAll('.scan-warnings')].map(item => ({open:item.open, text:item.textContent})) })`,
             ),
         )
         if (nativeInput)

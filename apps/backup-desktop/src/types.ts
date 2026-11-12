@@ -1,3 +1,22 @@
+export type FilterCategory =
+    | 'path'
+    | 'type'
+    | 'name'
+    | 'mtime'
+    | 'size'
+    | 'user'
+export interface FilterRule {
+    category: FilterCategory
+    pattern?: string
+    value?: string
+    min?: string
+    max?: string
+}
+export interface BackupFilters {
+    include: FilterRule[]
+    exclude: FilterRule[]
+}
+
 export interface BackupTask {
     id: string
     path: string
@@ -7,6 +26,7 @@ export interface BackupTask {
     selection?: SourceEntry[]
     file_types?: FileType[]
     preserve_empty_dirs?: boolean
+    filters?: BackupFilters
 }
 
 export type FileType =
@@ -30,6 +50,7 @@ export interface SourcePlan {
         selection?: SourceEntry[]
         file_types?: FileType[]
         preserve_empty_dirs?: boolean
+        filters?: BackupFilters
     }
     items: (SourceEntry & { restore_path: string })[]
     merged_count: number
@@ -95,6 +116,7 @@ export interface Version {
     selection?: SourceEntry[]
     file_types?: FileType[]
     preserve_empty_dirs?: boolean
+    filters?: BackupFilters
     completed_at: string
     files: string
     directories: string
@@ -124,6 +146,7 @@ export interface Operation {
     selection?: SourceEntry[]
     file_types?: FileType[]
     preserve_empty_dirs?: boolean
+    filters?: BackupFilters
     destination?: string
     version_id?: string
     target: Target
@@ -201,6 +224,7 @@ export interface DesktopApi {
         targetId: string,
         fileTypes: ContentFileType[],
         preserveEmptyDirs: boolean,
+        filters?: BackupFilters,
     ): Promise<SourcePlan>
     createTask(
         paths: string[],
@@ -208,7 +232,13 @@ export interface DesktopApi {
         name: string,
         fileTypes: ContentFileType[],
         preserveEmptyDirs: boolean,
+        filters?: BackupFilters,
     ): Promise<BackupTask>
+    updateTaskFilters(id: string, filters: BackupFilters): Promise<BackupTask>
+    previewTaskFilters(
+        id: string,
+        filters: BackupFilters,
+    ): Promise<{ operation_id: string }>
     removeTask(id: string): Promise<void>
     scanTask(id: string): Promise<{ operation_id: string }>
     backupTask(id: string): Promise<{ operation_id: string }>

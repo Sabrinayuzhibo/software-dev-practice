@@ -37,6 +37,7 @@ void fetchManifest(Channel& channel, const QString& versionId,
     const auto format = summary.value("format").toInt();
     require(supportedVersionFormat(format), "Unsupported version format");
     Manifest catalog;
+    QSet<QString> allowedEmptyDirectories;
     const SourceScope scope(summary, "source");
     QCryptographicHash hash(QCryptographicHash::Sha256);
     qint64 offset = 0;
@@ -60,6 +61,14 @@ void fetchManifest(Channel& channel, const QString& versionId,
                     "Manifest entry is outside the saved selection: " +
                         text(entry, "path"));
             catalog.append(entry, format);
+            if (scope.hasFilters() && scope.preservesEmptyDirectories() &&
+                entry.value("type") == "directory" &&
+                scope.matches(text(entry, "path"), "directory", 0,
+                              number(entry, "uid"),
+                              signedNumber(entry, "mtime_sec")))
+            {
+                allowedEmptyDirectories.insert(text(entry, "path"));
+            }
             const auto line =
                 QJsonDocument(entry).toJson(QJsonDocument::Compact) + '\n';
             writeAll(output, line);
@@ -78,12 +87,13 @@ void fetchManifest(Channel& channel, const QString& versionId,
         const auto path = text(value.toObject(), "path");
         require((value.toObject().value("type") == "directory" &&
                  !scope.includes("directory")) ||
-                    catalog.contains(path),
+                    catalog.contains(path) || scope.hasFilters(),
                 "Selected source missing from manifest: " + path);
     }
-    if (scope.hasEmptyDirectoryRule() && !scope.preservesEmptyDirectories())
+    if (scope.hasFilters() ||
+        (scope.hasEmptyDirectoryRule() && !scope.preservesEmptyDirectories()))
     {
-        catalog.requirePopulatedDirectories();
+        catalog.requirePopulatedDirectories(allowedEmptyDirectories);
     }
     const auto totals = catalog.totals();
     for (auto item = totals.begin(); item != totals.end(); ++item)

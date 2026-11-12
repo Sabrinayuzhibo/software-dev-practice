@@ -207,7 +207,7 @@ QJsonObject SourceEntries::process(const QString& path, const struct stat& info,
     }
     QJsonObject entry{{"path", path}, {"type", type}};
     require(type != "socket", "Socket node backups are no longer supported");
-    if (type == "directory" || type == "symlink" || type == "fifo")
+    if (supportedEntryType(type))
     {
         addMetadata(entry, info);
     }
@@ -361,7 +361,9 @@ QJsonObject sourceTree(const QJsonObject& source, Channel* channel,
         increment(status, "error_count");
     };
     QSet<QString> processed;
+    QSet<QString> excludedDirectories;
     QHash<QString, struct stat> deferredDirectories;
+    QSet<QString> structuralDirectories;
     std::function<void(const QString&)> visit;
     const auto includeParents = [&](const QString& path)
     {
@@ -374,7 +376,9 @@ QJsonObject sourceTree(const QJsonObject& source, Channel* channel,
             if (deferredDirectories.contains(parent))
             {
                 const auto info = deferredDirectories.take(parent);
-                addSample(sample, entries.process(parent, info, status));
+                addSample(sample, entries.process(
+                                      parent, info, status,
+                                      structuralDirectories.contains(parent)));
             }
         }
     };
@@ -385,6 +389,15 @@ QJsonObject sourceTree(const QJsonObject& source, Channel* channel,
         if (processed.contains(path))
         {
             return;
+        }
+        auto parentSlash = path.lastIndexOf('/');
+        while (parentSlash >= 0)
+        {
+            if (excludedDirectories.contains(path.left(parentSlash)))
+            {
+                return;
+            }
+            parentSlash = path.lastIndexOf('/', parentSlash - 1);
         }
         const auto previous = number(status, "bytes");
         QString type = expected;
@@ -399,18 +412,26 @@ QJsonObject sourceTree(const QJsonObject& source, Channel* channel,
                 scope.excludesDirectorySubtree(path, info.st_uid,
                                                info.st_mtim.tv_sec))
             {
+                excludedDirectories.insert(path);
                 processed.insert(path);
                 progress(status);
                 return;
             }
-            if (type == "directory" && !structural &&
-                (!scope.includes("directory") ||
-                 !scope.matches(path, type, 0, info.st_uid,
-                                info.st_mtim.tv_sec)))
+            if (type == "directory" &&
+                (structural || (!scope.includes("directory") ||
+                                !scope.matches(path, type, 0, info.st_uid,
+                                               info.st_mtim.tv_sec))))
             {
                 deferredDirectories.insert(path, info);
+                if (structural)
+                {
+                    structuralDirectories.insert(path);
+                }
                 processed.insert(path);
-                visit(path);
+                if (!structural)
+                {
+                    visit(path);
+                }
                 progress(status);
                 return;
             }
@@ -426,9 +447,8 @@ QJsonObject sourceTree(const QJsonObject& source, Channel* channel,
                           "not supported"
                         : type + " node skipped; select this type to back it "
                                  "up";
-                QJsonObject skipped{{"path", path},
-                                    {"type", type},
-                                    {"reason", reason}};
+                QJsonObject skipped{
+                    {"path", path}, {"type", type}, {"reason", reason}};
                 addSample(sample, skipped);
                 warnings.append(skipped);
                 processed.insert(path);
@@ -559,7 +579,10 @@ QJsonObject sourceTree(const QJsonObject& source, Channel* channel,
              item != deferredDirectories.end(); ++item)
         {
             checkCancelled();
-            require(sameFileState(item.value(), statBelow(root.get(), item.key())),
+            const auto after = statBelow(root.get(), item.key());
+            require(structuralDirectories.contains(item.key())
+                        ? sameDirectory(item.value(), after)
+                        : sameFileState(item.value(), after),
                     "Source directory changed during traversal: " + item.key());
         }
         struct stat after

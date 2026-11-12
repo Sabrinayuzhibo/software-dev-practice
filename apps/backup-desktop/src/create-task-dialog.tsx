@@ -9,12 +9,13 @@ import {
     Plus,
 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
-import type { ContentFileType, SourcePlan } from './types'
+import type { BackupFilters, ContentFileType, SourcePlan } from './types'
 import type { ConsoleModel } from './use-backup-console'
 import { Dialog } from './workflow'
 import { taskTitle } from './source-scope'
 import { entryTypeLabels } from './ui'
 import { FileTypePicker, defaultFileTypes } from './file-type-filter'
+import { FilterEditor, emptyFilters, filterError } from './backup-filters'
 
 function sourceError(failure: unknown): string {
     const message = String(failure)
@@ -123,6 +124,7 @@ export function CreateTaskDialog({
     model: ConsoleModel
     onClose: () => void
 }) {
+    const [filters, setFilters] = useState<BackupFilters>(emptyFilters)
     const [paths, setPaths] = useState<string[]>([])
     const [plan, setPlan] = useState<SourcePlan | null>(null)
     const [name, setName] = useState('')
@@ -153,11 +155,17 @@ export function CreateTaskDialog({
         destinationId = targetId,
         types = fileTypes,
         preserve = preserveEmptyDirs,
+        rules = filters,
     ) {
         const current = ++request.current
         setPaths([...new Set(next)])
         setPlan(null)
         setError('')
+        if (filterError(rules)) {
+            setPending(false)
+            setError(filterError(rules))
+            return
+        }
         if (!types.length) {
             setPending(false)
             setError('至少选择一种可备份类型。')
@@ -174,6 +182,7 @@ export function CreateTaskDialog({
                 destinationId,
                 types,
                 preserve,
+                rules,
             )
             if (current === request.current) {
                 setPlan(result)
@@ -220,6 +229,7 @@ export function CreateTaskDialog({
                 name.trim(),
                 fileTypes,
                 preserveEmptyDirs,
+                filters,
             )
             onClose()
         } catch (failure) {
@@ -352,6 +362,20 @@ export function CreateTaskDialog({
                         </GlassButton>
                     </div>
                 )}
+                <FilterEditor
+                    value={filters}
+                    disabled={model.busy}
+                    onChange={(next) => {
+                        setFilters(next)
+                        void preview(
+                            paths,
+                            targetId,
+                            fileTypes,
+                            preserveEmptyDirs,
+                            next,
+                        )
+                    }}
+                />
                 <SourceList
                     paths={paths}
                     plan={plan}
@@ -388,7 +412,12 @@ export function CreateTaskDialog({
                     type="submit"
                     form="create-task-form"
                     className="backup-button create-task"
-                    disabled={disabled || !plan || !fileTypes.length}
+                    disabled={
+                        disabled ||
+                        !plan ||
+                        !fileTypes.length ||
+                        !!filterError(filters)
+                    }
                 >
                     {model.mutating ? (
                         <LoaderCircle size={16} className="spinning" />

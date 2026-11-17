@@ -60,7 +60,8 @@ BackupServer::BackupServer(QObject* parent) : QObject(parent)
                                         response.payload = {
                                             {"server", "Backup Server"},
                                             {"data_root", repository_.root()},
-                                            {"protocol", 1}};
+                                            {"protocol", 1},
+                                            {"archive_format", 1}};
                                     }
                                     else if (action == "authenticate")
                                     {
@@ -162,9 +163,9 @@ QJsonObject BackupServer::handleRequest(const QString& action,
     {
         return repository_.download(args);
     }
-    if (action == "begin")
+    if (action == "begin" || action == "begin_import")
     {
-        const auto result = repository_.begin(args);
+        const auto result = repository_.begin(args, action == "begin_import");
         *uploading = true;
         return result;
     }

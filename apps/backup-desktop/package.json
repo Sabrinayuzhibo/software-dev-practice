@@ -7,6 +7,8 @@
     "build": "tsc -p tsconfig.node.json && tsc -p tsconfig.app.json && vite build",
     "start": "electron .",
     "test:window": "node ../../tests/desktop_window_smoke.mjs",
+    "test:archive": "node ../../tests/desktop_archive_window.mjs",
+    "test:realtime": "node ../../tests/desktop_realtime_window.mjs",
     "test:bridge": "node ../../tests/agent_bridge_test.mjs"
   },
   "dependencies": {

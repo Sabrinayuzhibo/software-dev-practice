@@ -646,7 +646,7 @@ Windows 测试使用 Win32 `ShowWindowAsync` 和鼠标事件，经 WSLg 到 Elec
 | 命令 | 结果 |
 | --- | --- |
 | `./scripts/build.sh`（修正旧硬链接兼容后） | C++ 构建、21/21 个 Meson 套件及桌面端构建通过，0 失败、0 跳过、0 超时。1 GiB 压缩流式套件通过，265.65 秒。完整日志为 `build-passed.log` |
-| 最后增加节点权限设置的 `AT_SYMLINK_NOFOLLOW` 后，加载 Qt 环境重新编译并运行 `meson test -C build backup-metadata backup-metadata-owners backup-file-types backup-file-type-mounts backup-integration backup-compression --print-errorlogs` | 最终二进制补验 6/6 通过，覆盖元数据、实际属主权限失败、字符/块设备挂载与跨设备边界、基础还原和两种压缩。没有把这次六套件写成再次运行完整 21 套件 |
+| 最后增加节点权限设置的 `AT_SYMLINK_NOFOLLOW` 后，加载 Qt 环境重新编译并运行 `meson test -C build backup-metadata backup-metadata-owners backup-file-types backup-file-type-mounts backup-integration backup-compression --print-errorlogs` | 最终二进制补验 8/8 通过，覆盖元数据、实际属主权限失败、字符/块设备挂载与跨设备边界、基础还原和两种压缩。没有把这次六套件写成再次运行完整 21 套件 |
 | 加载 Qt 环境运行 `backup_filter_acceptance.py`，输出到 `/home/jjj/course/cpp/backup-filter-metadata-20261117` | 33 组筛选及 2 组压缩组合再次通过，普通文件和硬链接成员还原后的 mtime 改为强制断言，全部一致；重启后历史版本还原通过，结果记录 `mtime_verified: true` |
 | 格式 / 语法 | clang-format 18.1.8 格式化本轮 C++ 修改行和新增故障库，保留无关旧代码；Black 检查两个新增 Python 专项，Python 语法、桌面改动 Prettier 和 `git diff --check` 通过 |
 
@@ -697,3 +697,61 @@ Windows 测试使用 Win32 `ShowWindowAsync` 和鼠标事件，经 WSLg 到 Elec
 证据保留在 `/home/jjj/course/cpp/backup-interface-trim-20261117-evidence/`：完整构建、后端原始测试日志、首轮专项、桥接及编译日志，以及本轮开始前和最终源码哈希。改动范围核对只包含计划内的 11 个既有文件修改和 3 个模块/测试文件改名，其他基线文件保持不变。
 
 本轮未重复完整窗口回归：Electron/React、IPC 字段和布局均未修改，上一次窗口回归结果保留在上一节，不作为精简后再次运行窗口测试的证据。变化的 C++ 路径由本轮模块及真实进程集成测试验证；当前机器以外的平台、物理掉电和百万条目仍未验收。
+
+## 2026-11-17 独立归档导出与导入（FR-13）
+
+测试基线为 `1db0a96` 上的本轮工作区。参考本地《打包解包技术》讲义第 2—4、10—13 页，以自有 BSAR1 实现完整版本单文件导出、导入新版本并复用还原。格式、课件对应、操作步骤和范围见[归档说明](archive.md)。本轮没有执行 Git 提交，也没有将 FR-15 加密、随机索引或增量归档计为完成。
+
+| 验证 | 实际结果 |
+| --- | --- |
+| 第一轮普通文件/空文件真实进程验证 | 导出 `.bsar`、导入新版本、还原内容一致，空文件可读；运行工具时最初未加载用户级 Qt 环境导致进程无法启动，加载 `scripts/qt-env.sh` 后验证通过 |
+| `archive-test` | none/Huffman/LZ77 内容以 37 字节记录切开压缩头和负载，增量解码和摘要正确，回调输出块不超过 256 KiB；重复 finish、完成后继续写入及中断回调被正确处理；补充拒绝旧版本格式与新节点配置冲突 |
+| `backup-archive` | 原仓库停止并移走、来源移走后，三种源编码到三种目标策略的 9 种组合导入还原通过。空文件、空/只读目录、中文长路径、原始非 UTF-8 链接目标、外部/悬空链接、硬链接 inode 关系、FIFO、权限/UID/GID/纳秒 mtime 均核对；103 条警告跨页保留。历史 socket、带明确来源选择及自定义规则的版本、无条目版本、忽略不支持的 50 KiB 根属性扩展后保持实际元数据、重启后还原通过 |
+| `backup-archive` 非法输入 | 27 组损坏/不完整归档拒绝，包括未知版本/标志/记录、超限声明长度、缺终止记录、追加尾字节、重复摘要、错置警告、内容损坏且重新计算外包摘要、组外硬链接、非法路径/属性、chown 哨兵 UID/GID 和压缩内容损坏；另拒绝缺失文件、目录、软链接及 FIFO 输入。失败后目标版本数不变，已有输出文件不被覆盖，来源/仓库/状态目录内导出被拒绝 |
+| `archive-faults` | 导出断线清理临时文件；源归档在上传开始后被改写，已验证的私有快照仍正确导入；丢失提交回执通过同一 ID 查询且不重复发布；无法确认时 WAITING，恢复后确认；强制中断导入并重启 Agent，记录 INTERRUPTED，旧版本仍可还原 |
+| `archive-disk-full` | 私有 user/mount namespace 的真实 1 MiB 导出空间和 2 MiB 仓库存储不足均触发 ENOSPC；无目标半成品归档/可还原半成品版本，导出临时文件清理，旧版本仍可还原。本机实际执行，没有跳过 |
+| `./scripts/build.sh` | C++、27/27 个 Meson 套件、TypeScript 和 Vite 构建通过，退出码 0；0 失败、0 跳过、0 超时，无新增编译告警。新增归档流式套件通过，154.66 秒 |
+| 最后补齐版本格式/节点配置一致性、元数据数值规范化及清单长度检查并完成格式整理后，重编并执行 `meson test -C build archive-test backup-archive archive-faults archive-disk-full backup-metadata backup-integration backup-file-types backup-file-type-mounts --print-errorlogs` | 最终二进制补验 8/8 通过；没有把补验记为第二次完整 27 套件运行 |
+| `npm run test:archive --prefix apps/backup-desktop` | 真实 Electron/Wayland/SwiftShader 窗口专项通过，退出码 0：原生选择器取消、保存路径、拒绝覆盖、停原服务并移走原仓库/来源后导入另一压缩策略目标、从新版本还原、损坏提示、记录重载和关闭均通过；1120×760、850×600 无页面/表格横向溢出。已查看窄窗截图 |
+| `npm run test:bridge --prefix apps/backup-desktop` | 通过；超大 UTF-8 响应不破坏后续请求和后台工作 |
+
+大文件单独建立新进程，实际备份、导出、导入并还原 64 MiB+4 字节与 1 GiB+4 字节文件，内容 SHA-256 一致。来源内容文件在导出前删除，验证导出读取的是已提交版本；进程 VmHWM 观测如下：
+
+| 文件规模 | Agent 峰值 KiB | Server 峰值 KiB |
+| --- | ---: | ---: |
+| 64 MiB | 25240 | 22724 |
+| 1 GiB | 25448 | 22700 |
+
+实际峰值没有随单文件长度线性增长；这不等于目录条目数量可无限增长，清单校验仍需与条目数相关的状态。
+
+最初构造历史 socket 样本时，错误保留了格式 4 的元数据，并未同步允许的类型范围，旧校验器正确拒绝导出。已修正夹具为符合格式 3 的字段和保存范围，没有为通过测试而放宽原清单/范围校验。
+
+窗口脚本首轮将被信号终止进程的 `exitCode === null` 误判为仍在运行；修正为同时查看 `signalCode`。第二轮所有业务断言通过，但主进程调试连接尚未断开，Electron 等待调试器而未退出；脚本在等待退出前关闭两条调试连接后，完整归档窗口专项通过。没有修改应用的退出行为或放宽业务断言。本轮运行归档窗口专项，未重复包含全部玻璃/其他功能的完整窗口脚本；对应后台功能由完整 Meson 回归覆盖。
+
+格式使用 clang-format 18.1.8 整理新增 C++ 和既有文件修改行，Black 整理三个新 Python 脚本，Prettier 检查前端与窗口脚本，`git diff --check` 通过。当前源码与已提交旧代码的差异只属于本轮归档功能、共用版本校验及相关测试/文档。证据目录为 `/home/jjj/course/cpp/backup-archive-20261117-evidence/`，包含完整构建、专项与补验日志、内存观测、源码哈希及两种尺寸截图。
+
+当前仅支持未加密 BSAR1 和已声明的 Linux 类型/元数据范围；未知加密标志拒绝，不宣称通过密码错误/认证加密验收，也未覆盖物理掉电、任意文件系统或百万条目规模。
+
+## 2026-11-17 本地实时备份与常驻 Agent（FR-09）
+
+在此前未提交的归档实现上继续开发；本轮没有执行 Git 提交。现有手动备份、压缩、元数据、筛选和归档逻辑复用，新增同用户 Unix socket 服务、GUI 控制代理、Linux inotify 监听及串行实时调度。使用方法、状态、开机边界见[实时备份说明](realtime.md)。
+
+已实际完成的专项验证：
+
+| 验证 | 实际结果 |
+| --- | --- |
+| `backup_realtime.py` 第一轮、溢出补充轮 | 首次自动备份、连续写入合并、子目录新增、重命名、删除，版本还原内容正确；关闭代理后修改，重开 PID 相同且产生新版本；Server 停止显示 RETRYING，恢复连接后补齐；SIGKILL Agent 后重启补扫；关闭开关后不再自动备份。第二轮用 SIGSTOP 暂停 Agent 后制造超过主机 inotify 队列容量的连续重命名，实际观察 overflow_count 增加且还原包含溢出后的文件 |
+| `backup_realtime_faults.py` | 代理延迟已提交版本的响应，等待期间新增文件，随后自动产生包含新文件的版本；丢弃提交和确认响应进入 WAITING，关闭再开启仍暂停，不创建新操作；放通并确认同一操作后处理积累变化。最初测试在上传中新增文件，却错误期待两次成功；实际正确拒绝源目录变化并重试，因此将“成功后的排队”场景改为延迟提交响应后验证 |
+| `node tests/desktop_realtime_window.mjs` | 真实 Electron 窗口点击实时复选框，初次备份后显示监控中；关闭整个 GUI 后修改文件，再开连接相同 PID，查看后台记录，并实际还原修改后的内容；关闭开关成功。850×600 无横向溢出，已查看截图 |
+| `npm run test:archive --prefix apps/backup-desktop` | 切换常驻代理后，原有归档窗口专项仍通过，包括原生选择器、导出、原仓库不可用后的导入/还原、损坏拒绝、记录重载、1120/850 布局和退出。测试结束额外清理自己的常驻服务 |
+| `npm run test:bridge --prefix apps/backup-desktop` | UTF-8 超大答复、迟到答复、分帧与后续请求通过；仅失败对应请求，后台执行不被取消 |
+
+完整构建和最终补验结果在本节后续记录，不把专项通过代替未执行的场景。未执行开机自启安装、百万路径规模、跨用户攻击和物理掉电；本轮不包含远端认证/加密解锁。明确选定来源本身缺失时等待恢复，不发布空成功版本。恢复单文件原子替换监听和实时筛选排除已加入完整回归用例。
+
+
+最终记录：
+
+- `./scripts/build.sh`：C++ 构建、29/29 个 Meson 套件、TypeScript 和 Vite 构建通过；0 失败、0 跳过、0 超时，无新增编译告警。`backup-realtime` 32.83 秒、`realtime-faults` 9.27 秒；新增单文件原子替换、自动版本筛选排除与真实队列溢出用例均执行。
+- 完整回归后补齐控制通道销毁前断开回调、开启任务时合并时间起点，以及通过固定节点描述符监听以拒绝来源父目录软链接替换。重新编译后执行 `meson test -C build backup-realtime realtime-faults --print-errorlogs`：最终二进制 2/2 通过（34.74 秒、9.52 秒）。未将专项补验记为第二次完整回归。
+- 修改文件通过 clang-format 18.1.8、TypeScript/窗口脚本 Prettier、Python Black 和 `git diff --check`。界面只在任务卡新增开关/状态，既有窗口脚本仅补充其隔离 Agent 的清理，没有据此宣称重跑完整历史窗口套件。
+- 日志和已查看截图保存在 `/home/jjj/course/cpp/backup-realtime-20261117-evidence/`，包括 `full-build.log`、`final-focused.log`、`window.log`、`archive-window.log`、`bridge.log` 和 `realtime-850.png`。

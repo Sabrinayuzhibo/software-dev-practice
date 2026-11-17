@@ -49,6 +49,15 @@ export function TaskCard({
     const latest = records.find(
         (record) => record.task_id === task.id && record.action === 'backup',
     )
+    const realtime = model.config.realtime_status?.[task.id]
+    const realtimeLabels = {
+        DEGRADED: '监听受限，定期核对',
+        WATCHING: '监控中',
+        PENDING: '等待备份',
+        BACKING_UP: '正在备份',
+        RETRYING: '等待重试',
+        WAITING_CONFIRMATION: '等待确认提交结果',
+    }
     const titleId = `task-${task.id}`
     const SourceIcon = !task.selection
         ? Folder
@@ -85,6 +94,37 @@ export function TaskCard({
                         root={task.path}
                         selection={task.selection}
                     />
+                    <label className="realtime-toggle">
+                        <input
+                            type="checkbox"
+                            aria-label="实时备份"
+                            checked={task.realtime === true}
+                            disabled={model.mutating}
+                            onChange={(event) =>
+                                void model.setTaskRealtime(
+                                    task.id,
+                                    event.target.checked,
+                                )
+                            }
+                        />
+                        实时备份
+                        <span role="status">
+                            {task.realtime
+                                ? realtime
+                                    ? realtimeLabels[realtime.state]
+                                    : '正在连接'
+                                : '已关闭'}
+                        </span>
+                    </label>
+                    {task.realtime && (
+                        <small>关闭窗口后继续备份；关闭开关可停止监控。</small>
+                    )}
+                    {task.realtime &&
+                        (realtime?.error || realtime?.monitor_error) && (
+                            <small className="error-text">
+                                {realtime.error || realtime.monitor_error}
+                            </small>
+                        )}
                     <small>
                         {latest
                             ? `最近备份：${stateLabels[latest.state]} · ${formatTime(latest.started_at)}`

@@ -205,7 +205,8 @@ void checkNodes(const QString& directory)
 
 void checkOperations(const QString& source, const QString& state)
 {
-    for (const auto* action : {"scan", "backup", "restore", "delete_version"})
+    for (const auto* action : {"scan", "backup", "restore", "delete_version",
+                               "export_archive", "import_archive"})
     {
         require(isDataOperation(action), "Missing data operation");
     }

@@ -5,6 +5,8 @@ import {
     Archive,
     ArrowDownToLine,
     Database,
+    Download,
+    Upload,
     Folder,
     Plus,
     RefreshCw,
@@ -219,6 +221,16 @@ export function VersionsView({ model }: { model: ConsoleModel }) {
                     </GlassSelect>
                 </label>
                 <GlassButton
+                    className="import-archive"
+                    disabled={
+                        busy || versionsLoading || connection.state !== 'online'
+                    }
+                    onClick={() => void model.importArchive()}
+                >
+                    <Upload size={16} />
+                    导入归档
+                </GlassButton>
+                <GlassButton
                     disabled={
                         busy ||
                         versionsLoading ||
@@ -356,6 +368,26 @@ export function VersionsView({ model }: { model: ConsoleModel }) {
                                         >
                                             <ArrowDownToLine size={16} />
                                             还原到…
+                                        </GlassButton>
+                                        <GlassButton
+                                            className="icon-button export-archive"
+                                            title="导出归档"
+                                            aria-label="导出归档"
+                                            disabled={
+                                                busy ||
+                                                versionsLoading ||
+                                                ![
+                                                    'online',
+                                                    'storage-unavailable',
+                                                ].includes(connection.state)
+                                            }
+                                            onClick={() =>
+                                                void model.exportArchive(
+                                                    version,
+                                                )
+                                            }
+                                        >
+                                            <Download size={16} />
                                         </GlassButton>
                                         <GlassButton
                                             className="icon-button delete-version"

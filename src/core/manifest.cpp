@@ -57,11 +57,26 @@ void validateMetadata(const QJsonObject& entry)
         const auto gid = number(entry, "gid");
         signedNumber(entry, "mtime_sec");
         const auto nanoseconds = number(entry, "mtime_nsec");
-        require(mode <= 0777 && uid <= std::numeric_limits<uid_t>::max() &&
-                    gid <= std::numeric_limits<gid_t>::max() &&
+        // chown 用全 1 的 UID/GID 表示不修改，不能作为要恢复的身份。
+        require(mode <= 0777 && uid < std::numeric_limits<uid_t>::max() &&
+                    gid < std::numeric_limits<gid_t>::max() &&
                     nanoseconds < 1000000000,
                 "Invalid file metadata: " + path);
     }
+}
+
+QJsonObject metadataFields(const QJsonObject& entry)
+{
+    validateMetadata(entry);
+    if (!entry.contains("mode"))
+    {
+        return {};
+    }
+    return {{"mode", number(entry, "mode")},
+            {"uid", QString::number(number(entry, "uid"))},
+            {"gid", QString::number(number(entry, "gid"))},
+            {"mtime_sec", QString::number(signedNumber(entry, "mtime_sec"))},
+            {"mtime_nsec", QString::number(number(entry, "mtime_nsec"))}};
 }
 
 void Manifest::checkPath(const QString& path) const

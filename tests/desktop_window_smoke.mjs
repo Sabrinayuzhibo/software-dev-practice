@@ -1465,6 +1465,11 @@ try {
     console.error(output)
     throw error
 } finally {
+    // 清理本测试启动的常驻 Agent，不影响用户正在运行的实例。
+    try {
+        const lock = await readFile(join(temporary, 'agent-state/agent.lock'), 'utf8')
+        process.kill(Number(lock.split('\n')[0]), 'SIGTERM')
+    } catch {}
     page?.close()
     main?.close()
     if (child.exitCode === null) {

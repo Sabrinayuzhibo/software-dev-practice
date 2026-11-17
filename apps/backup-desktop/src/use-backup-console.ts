@@ -77,7 +77,11 @@ export function useBackupConsole() {
     const versionRequest = useRef(0)
     const recordsRequest = useRef(0)
     const recordDetailRequest = useRef(0)
-    const busy = activeId !== null || !!starting || mutating
+    const busy =
+        activeId !== null ||
+        !!starting ||
+        mutating ||
+        config.agent_busy === true
     const target = config.targets.find((item) => item.id === targetId)
     const tasks = config.tasks.filter((item) => item.target_id === targetId)
     const canBackup = connection.state === 'online'
@@ -252,10 +256,34 @@ export function useBackupConsole() {
     }, [loadRecords])
 
     useEffect(() => {
-        if (!activeId) {
+        let cancelled = false
+        let timer: ReturnType<typeof setTimeout>
+        const poll = async () => {
+            try {
+                const current = await window.backup.getConfig()
+                if (cancelled) return
+                setConfig(current)
+                if (current.tasks.some((task) => task.realtime)) {
+                    await loadRecords()
+                }
+            } catch {
+                // 保留现有信息，下次连接成功后继续刷新后台任务。
+            } finally {
+                if (!cancelled) timer = setTimeout(() => void poll(), 2000)
+            }
+        }
+        timer = setTimeout(() => void poll(), 2000)
+        return () => {
+            cancelled = true
+            clearTimeout(timer)
+        }
+    }, [loadRecords])
+
+    useEffect(() => {
+        if (!activeId && !config.agent_busy) {
             void refreshConnection()
         }
-    }, [refreshConnection, activeId])
+    }, [refreshConnection, activeId, config.agent_busy])
 
     useEffect(() => {
         if (
@@ -511,6 +539,23 @@ export function useBackupConsole() {
         }
     }
 
+    async function setTaskRealtime(id: string, enabled: boolean) {
+        setMutating(true)
+        try {
+            await window.backup.setTaskRealtime(id, enabled)
+            setConfig(await window.backup.getConfig())
+            setMessage(
+                enabled
+                    ? '实时备份已开启，关闭窗口后仍会继续。首次开启将备份当前内容。'
+                    : '实时备份已关闭，已开始的备份会继续完成。',
+            )
+        } catch (error) {
+            setMessage(String(error))
+        } finally {
+            setMutating(false)
+        }
+    }
+
     async function updateTaskFilters(id: string, filters: BackupFilters) {
         setMutating(true)
         try {
@@ -693,6 +738,30 @@ export function useBackupConsole() {
         }
     }
 
+    async function exportArchive(version: Version) {
+        await run(
+            () => window.backup.exportArchive(targetId, version.id),
+            '正在准备导出归档',
+            {
+                action: 'export_archive',
+                version_id: version.id,
+                source: version.source,
+                source_name: version.source_name,
+            },
+        )
+    }
+
+    async function importArchive() {
+        const started = await run(
+            () => window.backup.importArchive(targetId),
+            '正在准备导入归档',
+            { action: 'import_archive' },
+        )
+        if (started) {
+            setVersionTaskId('')
+        }
+    }
+
     async function restore() {
         if (!restoreCandidate || !restoreDestination) {
             return
@@ -802,12 +871,15 @@ export function useBackupConsole() {
         loadVersions,
         createTask,
         updateTaskFilters,
+        setTaskRealtime,
         removeTask,
         saveTarget,
         showRecord,
         viewVersions,
         removeCandidate,
         setRemoveCandidate,
+        exportArchive,
+        importArchive,
         restoreCandidate,
         setRestoreCandidate,
         restoreDestination,

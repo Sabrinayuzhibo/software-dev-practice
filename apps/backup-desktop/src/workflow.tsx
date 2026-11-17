@@ -25,6 +25,7 @@ import {
     stateLabels,
     specialEntryCounts,
     deletionError,
+    archiveError,
 } from './ui'
 
 export function Dialog({
@@ -298,7 +299,11 @@ export function OperationPanel({
                 <p className="error-text">
                     {detail.action === 'delete_version'
                         ? deletionError(detail.error)
-                        : detail.error}
+                        : ['export_archive', 'import_archive'].includes(
+                                detail.action,
+                            )
+                          ? archiveError(detail.error)
+                          : detail.error}
                 </p>
             )}
             {succeeded &&
@@ -310,34 +315,48 @@ export function OperationPanel({
                         项，请查看下方警告中的路径、字段和原因。
                     </p>
                 )}
+            {(detail.result?.archive_path || detail.archive_path) && (
+                <p className="path archive-path">
+                    归档文件：
+                    {detail.result?.archive_path || detail.archive_path}
+                </p>
+            )}
+            {succeeded && detail.action === 'export_archive' && (
+                <p role="status">归档已保存，可复制到其他仓库导入。</p>
+            )}
+            {succeeded && detail.action === 'import_archive' && (
+                <p role="status">归档已导入为新版本，可以在版本列表中还原。</p>
+            )}
             {succeeded && detail.action === 'delete_version' && (
                 <p role="status">所选版本已删除。</p>
             )}
             <div className="result-actions">
-                {succeeded && detail.action === 'backup' && (
-                    <GlassButton
-                        className="view-versions"
-                        onClick={() =>
-                            model.viewVersions(
-                                model.config.tasks.find(
-                                    (task) => task.id === detail.task_id,
-                                ),
-                            )
-                        }
-                    >
-                        <Archive size={16} />
-                        查看备份版本
-                    </GlassButton>
-                )}
-                {detail.state === 'WAITING' && detail.action === 'backup' && (
-                    <GlassButton
-                        disabled={busy}
-                        onClick={() => void model.confirmOperation(detail)}
-                    >
-                        <RefreshCw size={16} />
-                        确认提交结果
-                    </GlassButton>
-                )}
+                {succeeded &&
+                    ['backup', 'import_archive'].includes(detail.action) && (
+                        <GlassButton
+                            className="view-versions"
+                            onClick={() =>
+                                model.viewVersions(
+                                    model.config.tasks.find(
+                                        (task) => task.id === detail.task_id,
+                                    ),
+                                )
+                            }
+                        >
+                            <Archive size={16} />
+                            查看备份版本
+                        </GlassButton>
+                    )}
+                {detail.state === 'WAITING' &&
+                    ['backup', 'import_archive'].includes(detail.action) && (
+                        <GlassButton
+                            disabled={busy}
+                            onClick={() => void model.confirmOperation(detail)}
+                        >
+                            <RefreshCw size={16} />
+                            确认提交结果
+                        </GlassButton>
+                    )}
                 {detail.action === 'delete_version' &&
                     ['WAITING', 'FAILED', 'INTERRUPTED'].includes(
                         detail.state,

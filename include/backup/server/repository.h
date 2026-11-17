@@ -36,7 +36,7 @@ class Repository
     QJsonObject deleteVersion(const QString& id);
 
     // Exactly one connection owns an upload until commit or disconnect.
-    QJsonObject begin(const QJsonObject& request);
+    QJsonObject begin(const QJsonObject& request, bool archiveImport = false);
     void addEntry(const QJsonObject& entry);
     void append(const QJsonObject& request);
     void finishFile(const QString& digest);
@@ -65,6 +65,7 @@ class Repository
     QCryptographicHash fileHash_{QCryptographicHash::Sha256};
     QCryptographicHash storedHash_{QCryptographicHash::Sha256};
     qint64 receivedBytes_ = 0;
+    bool importingArchive_ = false;
     QCryptographicHash manifestHash_{QCryptographicHash::Sha256};
     std::unique_ptr<QLockFile> lock_;
 };

@@ -42,6 +42,8 @@ contextBridge.exposeInMainWorld('backup', {
             preserveEmptyDirs,
             filters,
         ),
+    setTaskRealtime: (id: string, enabled: boolean) =>
+        ipcRenderer.invoke('tasks:realtime', id, enabled),
     updateTaskFilters: (id: string, filters: unknown) =>
         ipcRenderer.invoke('tasks:update-filters', id, filters),
     previewTaskFilters: (id: string, filters: unknown) =>
@@ -85,6 +87,10 @@ contextBridge.exposeInMainWorld('backup', {
         ipcRenderer.invoke('operations:get', id, summary),
     getOperationWarnings: (id: string, offset = 0) =>
         ipcRenderer.invoke('operations:warnings', id, offset),
+    exportArchive: (targetId: string, versionId: string) =>
+        ipcRenderer.invoke('archives:export', targetId, versionId),
+    importArchive: (targetId: string) =>
+        ipcRenderer.invoke('archives:import', targetId),
     getRestoreEntries: (id: string, offset = 0) =>
         ipcRenderer.invoke('operations:restore-entries', id, offset),
     confirmOperation: (id: string, targetId: string) =>

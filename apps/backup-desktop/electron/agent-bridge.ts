@@ -40,9 +40,13 @@ export class AgentBridge {
                 `找不到 C++ Backup Agent：${executable}。请先运行 ./scripts/build.sh`,
             )
         }
-        const child = spawn(executable, ['--state-dir', this.stateDirectory], {
-            stdio: ['pipe', 'pipe', 'pipe'],
-        })
+        const child = spawn(
+            executable,
+            ['--connect', '--state-dir', this.stateDirectory],
+            {
+                stdio: ['pipe', 'pipe', 'pipe'],
+            },
+        )
         this.process = child
         this.buffer = ''
         this.bufferBytes = 0
@@ -60,7 +64,9 @@ export class AgentBridge {
         child.on('exit', (code) => {
             if (this.process === child) {
                 this.close(
-                    new Error(`Backup Agent 已退出（代码 ${code ?? '未知'}）`),
+                    new Error(
+                        `Backup Agent 控制连接已断开（代码 ${code ?? '未知'}）`,
+                    ),
                 )
             }
         })
@@ -192,6 +198,7 @@ export class AgentBridge {
 
     stop(): void {
         this.stopped = true
+        // 这里只结束控制代理；独立 Agent 继续执行后台任务。
         this.process?.stdin.end()
         this.process?.kill()
         this.close(new Error('应用正在关闭'))

@@ -1,3 +1,4 @@
+import { registerArchiveHandlers } from './archive-handlers'
 // Privileged desktop adapter: native dialogs and a fixed Agent command surface.
 import { app, BrowserWindow, dialog, ipcMain, Menu } from 'electron'
 import { promises as fs } from 'node:fs'
@@ -14,6 +15,12 @@ let bridge: AgentBridge
 let mainWindow: BrowserWindow | null = null
 
 function registerHandlers(): void {
+    registerArchiveHandlers(bridge, () => {
+        if (!mainWindow) {
+            throw new Error('窗口不可用')
+        }
+        return mainWindow
+    })
     const windowFor = (sender: Electron.WebContents): BrowserWindow => {
         const window = BrowserWindow.fromWebContents(sender)
         if (!window || window !== mainWindow) {
@@ -213,6 +220,20 @@ function registerHandlers(): void {
             })
         })
     }
+    ipcMain.handle(
+        'tasks:realtime',
+        (_event, id: unknown, enabled: unknown) => {
+            if (
+                typeof id !== 'string' ||
+                !id ||
+                id.length > 120 ||
+                typeof enabled !== 'boolean'
+            ) {
+                throw new Error('实时备份设置无效')
+            }
+            return bridge.send('set_task_realtime', { id, enabled })
+        },
+    )
     ipcMain.handle('tasks:remove', (_event, id: unknown) =>
         bridge.send('remove_task', { id }),
     )

@@ -27,6 +27,8 @@ export const actionLabels: Record<string, string> = {
     backup: '备份',
     restore: '还原',
     delete_version: '删除版本',
+    export_archive: '导出归档',
+    import_archive: '导入归档',
 }
 
 export const compressionLabels = {
@@ -43,6 +45,27 @@ export const stageLabels: Record<string, string> = {
     commit: '保存版本',
     confirm: '确认结果',
     delete: '删除版本',
+    archive_verify: '校验归档',
+    archive_export: '打包归档',
+    archive_import: '导入归档',
+}
+
+export function archiveError(error: string): string {
+    if (error.includes('Archive destination already exists')) {
+        return '所选归档文件已存在，请更换文件名。'
+    }
+    if (/Unsupported archive|Encrypted archives/.test(error)) {
+        return `不支持此归档格式，请选择本软件导出的归档。${error}`
+    }
+    if (
+        /checksum|Truncated|Incomplete archive|archive.*mismatch/i.test(error)
+    ) {
+        return `归档校验失败，文件可能损坏或不完整。${error}`
+    }
+    if (/No space left/i.test(error)) {
+        return `存储空间不足，请清理空间后重试。${error}`
+    }
+    return error
 }
 
 export function deletionError(error: string): string {

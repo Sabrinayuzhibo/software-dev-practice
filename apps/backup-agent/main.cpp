@@ -1,6 +1,8 @@
+#include "backup/agent/control_service.h"
 #include "backup/agent/operation_dispatch.h"
-// JSON-line control bridge. The event thread owns configuration and stdout;
-// one worker performs data operations and persists their progress/results.
+#include "backup/agent/realtime.h"
+#include <QDir>
+// 控制线程拥有配置和调度；单个工作线程执行备份并保存进度、结果。
 #include <QCommandLineParser>
 #include <QCoreApplication>
 #include <QElapsedTimer>
@@ -27,33 +29,32 @@ using namespace backup::core;
 using backup::agent::Channel;
 using backup::agent::State;
 
-void reply(const QString& id, bool ok, const QJsonObject& value)
-{
-    const QJsonObject object{
-        {"id", id}, {"ok", ok}, {ok ? "result" : "error", value}};
-    auto line = QJsonDocument(object).toJson(QJsonDocument::Compact) + '\n';
-    if (line.size() > backup::agent::kAgentReplyBytes)
-    {
-        const QJsonObject failure{
-            {"id", id},
-            {"ok", false},
-            {"error", QJsonObject{{"message",
-                                   "Response too large; use a paged query"}}}};
-        line = QJsonDocument(failure).toJson(QJsonDocument::Compact) + '\n';
-    }
-    std::fwrite(line.constData(), 1, static_cast<size_t>(line.size()), stdout);
-    std::fflush(stdout);
-}
-
 class CommandReader final : public QObject
 {
   public:
-    CommandReader(QCoreApplication* app, const QString& directory)
+    CommandReader(QCoreApplication* app, const QString& directory, bool daemon)
         : QObject(app), state_(directory),
-          notifier_(STDIN_FILENO, QSocketNotifier::Read, this)
+          control_(directory, daemon,
+                   [this](const QByteArray& line) { handle(line); }),
+          realtime_([this] { return busy_; },
+                    [this](const QString& id) {
+                        start({}, "start_backup",
+                              {{"task_id", id}, {"trigger", "realtime"}});
+                    })
     {
-        connect(&notifier_, &QSocketNotifier::activated, this,
-                [this] { readAvailable(); });
+        realtime_.configure(state_.config());
+        // 崩溃后的不确定提交必须先确认原版本，不能直接重新备份。
+        for (const auto& name : QDir(state_.directory() + "/operations")
+                                    .entryList({"*.json"}, QDir::Files))
+        {
+            const auto record =
+                readObject(state_.directory() + "/operations/" + name);
+            if (record.value("action") == "backup" &&
+                record.value("state") == "WAITING")
+            {
+                realtime_.completed(record);
+            }
+        }
     }
 
     ~CommandReader() override
@@ -66,34 +67,9 @@ class CommandReader final : public QObject
     }
 
   private:
-    void readAvailable()
+    void reply(const QString& id, bool ok, const QJsonObject& value)
     {
-        char chunk[8192];
-        const auto count = ::read(STDIN_FILENO, chunk, sizeof(chunk));
-        if (count <= 0)
-        {
-            if (count < 0 && errno == EINTR)
-            {
-                return;
-            }
-            notifier_.setEnabled(false);
-            QCoreApplication::quit();
-            return;
-        }
-        buffer_.append(chunk, static_cast<qsizetype>(count));
-        qsizetype end = 0;
-        while ((end = buffer_.indexOf('\n')) >= 0)
-        {
-            const auto line = buffer_.left(end);
-            buffer_.remove(0, end + 1);
-            handle(line);
-        }
-        if (buffer_.size() > kMaxJsonBytes)
-        {
-            reply({}, false, {{"message", "Command too long"}});
-            notifier_.setEnabled(false);
-            QCoreApplication::quit();
-        }
+        control_.reply(id, ok, value);
     }
 
     void handle(const QByteArray& line)
@@ -109,7 +85,11 @@ class CommandReader final : public QObject
             const auto args = command.value("payload").toObject();
             if (action == "config")
             {
-                reply(id, true, state_.config());
+                auto config = state_.config();
+                config.insert("realtime_status", realtime_.status());
+                config.insert("agent_busy", busy_);
+                config.insert("agent_pid", QCoreApplication::applicationPid());
+                reply(id, true, config);
             }
             else if (action == "operations")
             {
@@ -144,11 +124,15 @@ class CommandReader final : public QObject
             }
             else if (action == "add_task" || action == "remove_task" ||
                      action == "update_task_filters" ||
-                     action == "save_target" || action == "import_tasks")
+                     action == "set_task_realtime" || action == "save_target" ||
+                     action == "import_tasks")
             {
-                require(!busy_ || action == "save_target",
+                require(!busy_ || action == "save_target" ||
+                            action == "set_task_realtime",
                         "Agent is busy; wait before changing configuration");
-                reply(id, true, state_.configure(action, args));
+                const auto result = state_.configure(action, args);
+                realtime_.configure(state_.config());
+                reply(id, true, result);
             }
             else
             {
@@ -317,10 +301,12 @@ class CommandReader final : public QObject
             {"files", 0},
             {"bytes", 0},
             {"task_id", args.value("task_id")},
+            {"trigger", args.value("trigger")},
             {"target", target},
             {"source", args.value("path")},
             {"destination", args.value("destination")},
-            {"version_id", args.value("version_id")}};
+            {"version_id", args.value("version_id")},
+            {"archive_path", args.value("archive_path")}};
         if (args.contains("selection"))
         {
             record.insert("selection", args.value("selection"));
@@ -459,6 +445,14 @@ class CommandReader final : public QObject
                             }
                         }
                         busy_ = false;
+                        if (action == "backup")
+                        {
+                            realtime_.completed(record);
+                        }
+                        if (action == "confirm" && error.isEmpty())
+                        {
+                            realtime_.completed(result);
+                        }
                         if (!asynchronous)
                         {
                             reply(requestId, error.isEmpty(),
@@ -477,8 +471,8 @@ class CommandReader final : public QObject
     }
 
     State state_;
-    QSocketNotifier notifier_;
-    QByteArray buffer_;
+    backup::agent::ControlService control_;
+    backup::agent::Realtime realtime_;
     bool busy_ = false;
     QJsonObject lastRecord_;
     std::unique_ptr<QThread> worker_;
@@ -496,10 +490,17 @@ int main(int argc, char* argv[])
         {"state-dir", "Agent configuration and execution directory", "path",
          QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation) +
              "/backup-system"});
+    parser.addOption({"daemon", "Run background local control service"});
+    parser.addOption({"connect", "Connect to or start background Agent"});
     parser.process(app);
     try
     {
-        CommandReader reader(&app, parser.value("state-dir"));
+        if (parser.isSet("connect"))
+        {
+            return backup::agent::runControlProxy(parser.value("state-dir"));
+        }
+        CommandReader reader(&app, parser.value("state-dir"),
+                             parser.isSet("daemon"));
         return app.exec();
     }
     catch (const std::exception& error)

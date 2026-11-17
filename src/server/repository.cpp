@@ -234,7 +234,7 @@ QJsonObject Repository::download(const QJsonObject& request) const
             {"done", file.atEnd()}};
 }
 
-QJsonObject Repository::begin(const QJsonObject& request)
+QJsonObject Repository::begin(const QJsonObject& request, bool archiveImport)
 {
     const QString id = text(request, "operation_id");
     const QString finalPath = versionPath(id);
@@ -243,9 +243,19 @@ QJsonObject Repository::begin(const QJsonObject& request)
     require(!QFileInfo::exists(root_ + "/database/deletions/" + id + ".json"),
             "Operation belongs to a deleted version");
     const SourceScope source(request, "source");
-    require(!source.fileTypes().contains("socket"),
+    require(archiveImport || !source.fileTypes().contains("socket"),
             "Socket node backups are no longer supported");
-    require(!source.overlaps(root_), "Source overlaps repository");
+    require(archiveImport || !source.overlaps(root_),
+            "Source overlaps repository");
+    if (archiveImport)
+    {
+        const auto origin = request.value("imported_from").toObject();
+        require(
+            origin.value("archive_format").toInt() == 1 &&
+                validId(text(origin, "version_id")) &&
+                supportedVersionFormat(origin.value("source_format").toInt()),
+            "Invalid archive origin");
+    }
     require(validId(text(request, "task_id")), "Invalid task identifier");
     const auto compression = compressionAlgorithm(request);
     if (request.contains("source_name"))
@@ -264,6 +274,10 @@ QJsonObject Repository::begin(const QJsonObject& request)
                 {"source", source.root()},
                 {"started_at", now()},
                 {"rules", QJsonObject{}}};
+    if (archiveImport)
+    {
+        summary_.insert("imported_from", request.value("imported_from"));
+    }
     if (compression != "none")
     {
         summary_.insert("compression", compression);
@@ -304,8 +318,7 @@ QJsonObject Repository::begin(const QJsonObject& request)
                 "Invalid source root metadata");
         const auto metadata = request.value("root_metadata").toObject();
         require(metadata.contains("mode"), "Missing source root metadata");
-        validateMetadata(metadata);
-        summary_.insert("root_metadata", metadata);
+        summary_.insert("root_metadata", metadataFields(metadata));
     }
     entries_ = {};
     allowedEmptyDirectories_.clear();
@@ -330,6 +343,7 @@ QJsonObject Repository::begin(const QJsonObject& request)
         throw;
     }
     activeId_ = id;
+    importingArchive_ = archiveImport;
     QJsonObject receipt{{"version_id", id}, {"compression", compression}};
     if (!source.selection().isEmpty())
     {
@@ -353,9 +367,10 @@ QJsonObject Repository::begin(const QJsonObject& request)
 
 void Repository::recordEntry(const QJsonObject& entry)
 {
-    entries_.append(entry, summary_.value("format").toInt());
     const auto line =
         QJsonDocument(entry).toJson(QJsonDocument::Compact) + '\n';
+    require(line.size() < 64 * 1024, "Manifest entry exceeds supported size");
+    entries_.append(entry, summary_.value("format").toInt());
     writeAll(manifest_, line);
     manifestHash_.addData(line);
 }
@@ -367,19 +382,32 @@ void Repository::addEntry(const QJsonObject& entry)
     entries_.checkPath(path);
     const QString type = text(entry, "type");
     require(supportedEntryType(type), "Unsupported entry type");
-    require(type != "socket", "Socket node backups are no longer supported");
+    require(type != "socket" || importingArchive_,
+            "Socket node backups are no longer supported");
     currentEntry_ = {{"path", path},
                      {"type", type},
                      {"index", QString::number(entries_.count())}};
     for (const auto* key : {"link_group", "link_to", "target_base64",
-                            "device_major", "device_minor", "mode", "uid",
-                            "gid", "mtime_sec", "mtime_nsec"})
+                            "device_major", "device_minor"})
     {
         if (entry.contains(QLatin1String(key)))
         {
             currentEntry_.insert(QLatin1String(key),
                                  entry.value(QLatin1String(key)));
         }
+    }
+    // 归档来自外部：只保存支持的属性，规范化数值，避免异常文本膨胀清单。
+    const auto metadata = metadataFields(entry);
+    for (auto field = metadata.begin(); field != metadata.end(); ++field)
+    {
+        currentEntry_.insert(field.key(), field.value());
+    }
+    if (type == "character_device" || type == "block_device")
+    {
+        currentEntry_.insert("device_major",
+                             QString::number(number(entry, "device_major")));
+        currentEntry_.insert("device_minor",
+                             QString::number(number(entry, "device_minor")));
     }
     if (type == "file")
     {
@@ -476,6 +504,10 @@ void Repository::appendWarnings(const QJsonObject& request)
         {
             normalized.insert("type", text(warning, "type"));
         }
+        if (warning.value("type") == "metadata" && warning.contains("field"))
+        {
+            normalized.insert("field", text(warning, "field"));
+        }
         const auto line = detailLine(normalized);
         writeAll(warnings_, line);
         warningHash_.addData(line);
@@ -531,6 +563,7 @@ QJsonObject Repository::commit(const QString& id, const QJsonArray& warnings)
     require(QDir().rename(stagingPath_, versionPath(id)),
             "Cannot publish version");
     activeId_.clear();
+    importingArchive_ = false;
     syncDirectory(root_ + "/storage/versions");
     syncDirectory(root_ + "/storage/staging");
     return summary_;
@@ -544,5 +577,6 @@ void Repository::abort()
     // Keep interrupted staging for diagnosis; it is never returned by
     // list/read.
     activeId_.clear();
+    importingArchive_ = false;
 }
 } // namespace backup::server

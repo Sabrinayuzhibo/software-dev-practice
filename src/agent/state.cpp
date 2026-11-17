@@ -55,7 +55,7 @@ State::State(const QString& directory) : directory_(canonicalPath(directory))
     {
         config_ = readObject(path);
         require((config_.value("format").toInt() >= 1 &&
-                 config_.value("format").toInt() <= 7) &&
+                 config_.value("format").toInt() <= 8) &&
                     config_.value("tasks").isArray() &&
                     config_.value("targets").isArray(),
                 "Invalid Agent configuration; original file preserved");
@@ -83,6 +83,10 @@ State::State(const QString& directory) : directory_(canonicalPath(directory))
                         QDir(text(item, "path")).isAbsolute() &&
                         targetIds.contains(text(item, "target_id")),
                     "Invalid saved task");
+            require(!item.contains("realtime") ||
+                        (item.value("realtime").isBool() &&
+                         config_.value("format").toInt() >= 8),
+                    "Invalid saved realtime setting");
             taskIds.insert(id);
             const SourceScope scope(item);
             require(scope.selection().isEmpty() ||
@@ -331,7 +335,7 @@ QJsonObject State::importTasks(const QJsonArray& imported)
         auto item = value.toObject();
         require(!item.contains("selection") && !item.contains("file_types") &&
                     !item.contains("preserve_empty_dirs") &&
-                    !item.contains("filters"),
+                    !item.contains("filters") && !item.contains("realtime"),
                 "Legacy tasks must use whole directories; original preserved");
         const QString id = text(item, "id");
         require(validId(id), "Invalid legacy task identifier");
@@ -380,6 +384,27 @@ QJsonObject State::configure(const QString& action, const QJsonObject& args)
     {
         return updateTaskFilters(args);
     }
+    if (action == "set_task_realtime")
+    {
+        const auto id = text(args, "id");
+        task(id);
+        require(args.value("enabled").isBool(), "Invalid realtime switch");
+        auto next = config_;
+        auto tasks = next.value("tasks").toArray();
+        for (qsizetype index = 0; index < tasks.size(); ++index)
+        {
+            auto item = tasks[index].toObject();
+            if (item.value("id") == id)
+            {
+                item.insert("realtime", args.value("enabled"));
+                tasks[index] = item;
+            }
+        }
+        next.insert("tasks", tasks);
+        next.insert("format", 8);
+        save(next);
+        return next;
+    }
     if (action == "import_tasks")
     {
         if (config_.value("legacy_imported").toBool())
@@ -414,7 +439,7 @@ QJsonObject State::configure(const QString& action, const QJsonObject& args)
         if (compression != "none")
         {
             // 使旧版 Agent 拒绝无法识别的压缩策略，防止静默忽略配置。
-            next.insert("format", 7);
+            next.insert("format", std::max(7, next.value("format").toInt()));
         }
         const auto repository = args.value("repository_path").toString();
         if (!repository.isEmpty())

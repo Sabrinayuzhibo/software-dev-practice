@@ -26,9 +26,12 @@ export default function App() {
     const showOperationPanel =
         model.tab === 'records' ||
         (model.tab === 'versions' &&
-            ['restore', 'delete_version'].includes(
-                model.detail?.action || '',
-            ) &&
+            [
+                'restore',
+                'delete_version',
+                'export_archive',
+                'import_archive',
+            ].includes(model.detail?.action || '') &&
             model.detail &&
             model.detail.target.id === model.targetId)
     const panelId = showOperationPanel ? model.detail?.id : undefined

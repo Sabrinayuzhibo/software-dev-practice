@@ -8,6 +8,7 @@
 #include "backup/core/io.h"
 #include "backup/core/manifest.h"
 #include "backup/core/source_scope.h"
+#include "backup/core/version_verifier.h"
 
 #include <QCryptographicHash>
 #include <QFileInfo>
@@ -26,20 +27,7 @@ namespace
 void fetchManifest(Channel& channel, const QString& versionId,
                    const QJsonObject& summary, QTemporaryFile& output)
 {
-    const auto format = summary.value("format").toInt();
-    require(supportedVersionFormat(format), "Unsupported version format");
-    if (summary.contains("root_metadata"))
-    {
-        require(summary.value("root_metadata").isObject(),
-                "Invalid source root metadata");
-        const auto metadata = summary.value("root_metadata").toObject();
-        require(metadata.contains("mode"), "Missing source root metadata");
-        validateMetadata(metadata);
-    }
-    Manifest catalog;
-    QSet<QString> allowedEmptyDirectories;
-    const SourceScope scope(summary, "source");
-    QCryptographicHash hash(QCryptographicHash::Sha256);
+    VersionVerifier verifier(summary);
     qint64 offset = 0;
     while (true)
     {
@@ -51,28 +39,7 @@ void fetchManifest(Channel& channel, const QString& versionId,
         for (const auto& value : page.value("entries").toArray())
         {
             const auto entry = value.toObject();
-            if (format >= 5 && entry.value("type") == "file")
-            {
-                require(compressionAlgorithm(entry) ==
-                            compressionAlgorithm(summary),
-                        "Content compression differs from version policy");
-            }
-            require(scope.allows(entry),
-                    "Manifest entry is outside the saved selection: " +
-                        text(entry, "path"));
-            catalog.append(entry, format);
-            if (scope.hasFilters() && scope.preservesEmptyDirectories() &&
-                entry.value("type") == "directory" &&
-                scope.matches(text(entry, "path"), "directory", 0,
-                              number(entry, "uid"),
-                              signedNumber(entry, "mtime_sec")))
-            {
-                allowedEmptyDirectories.insert(text(entry, "path"));
-            }
-            const auto line =
-                QJsonDocument(entry).toJson(QJsonDocument::Compact) + '\n';
-            writeAll(output, line);
-            hash.addData(line);
+            writeAll(output, verifier.append(entry));
         }
         const auto next = number(page, "offset");
         if (page.value("done").toBool())
@@ -82,38 +49,7 @@ void fetchManifest(Channel& channel, const QString& versionId,
         require(next > offset, "Manifest cursor did not advance");
         offset = next;
     }
-    for (const auto& value : scope.selection())
-    {
-        const auto path = text(value.toObject(), "path");
-        require((value.toObject().value("type") == "directory" &&
-                 !scope.includes("directory")) ||
-                    catalog.contains(path) || scope.hasFilters(),
-                "Selected source missing from manifest: " + path);
-    }
-    if (scope.hasFilters() ||
-        (scope.hasEmptyDirectoryRule() && !scope.preservesEmptyDirectories()))
-    {
-        catalog.requirePopulatedDirectories(allowedEmptyDirectories);
-    }
-    const auto totals = catalog.totals();
-    for (auto item = totals.begin(); item != totals.end(); ++item)
-    {
-        const auto field = item.key().toLatin1();
-        if ((format == 1 && field != "entries" && field != "files" &&
-             field != "directories" && field != "bytes") ||
-            (format == 2 &&
-             (field == "character_devices" || field == "block_devices" ||
-              field == "sockets")))
-        {
-            continue;
-        }
-        require(number(summary, field.constData()) ==
-                    number(totals, field.constData()),
-                "Version manifest statistics mismatch: " + item.key());
-    }
-    require(QString::fromLatin1(hash.result().toHex()) ==
-                text(summary, "manifest_sha256"),
-            "Version manifest checksum mismatch");
+    verifier.finish();
     require(output.seek(0), "Cannot read verified manifest");
 }
 

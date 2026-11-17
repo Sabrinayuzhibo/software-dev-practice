@@ -18,6 +18,7 @@ export interface BackupFilters {
 }
 
 export interface BackupTask {
+    realtime?: boolean
     id: string
     path: string
     target_id: string
@@ -69,7 +70,23 @@ export interface Target {
     compression?: Compression
 }
 
+export interface RealtimeStatus {
+    state:
+        | 'WATCHING'
+        | 'PENDING'
+        | 'BACKING_UP'
+        | 'RETRYING'
+        | 'WAITING_CONFIRMATION'
+        | 'DEGRADED'
+    error: string
+    monitor_error: string
+    operation_id: string
+}
+
 export interface Configuration {
+    realtime_status?: Record<string, RealtimeStatus>
+    agent_busy?: boolean
+    agent_pid?: number
     tasks: BackupTask[]
     targets: Target[]
 }
@@ -151,6 +168,7 @@ export interface Operation {
     filters?: BackupFilters
     destination?: string
     version_id?: string
+    archive_path?: string
     target: Target
     path?: string
     files: number
@@ -171,7 +189,12 @@ export interface Operation {
     scan_count?: number
     failure_count?: number
     warning_runs?: number
-    result?: ScanResult & { version?: Version; destination?: string }
+    result?: ScanResult & {
+        version?: Version
+        destination?: string
+        archive_path?: string
+        archive_bytes?: string
+    }
 }
 
 export interface VersionDeletion {
@@ -236,6 +259,7 @@ export interface DesktopApi {
         preserveEmptyDirs: boolean,
         filters?: BackupFilters,
     ): Promise<BackupTask>
+    setTaskRealtime(id: string, enabled: boolean): Promise<Configuration>
     updateTaskFilters(id: string, filters: BackupFilters): Promise<BackupTask>
     previewTaskFilters(
         id: string,
@@ -269,6 +293,11 @@ export interface DesktopApi {
         versionId: string,
         destination: string,
     ): Promise<{ operation_id: string } | null>
+    exportArchive(
+        targetId: string,
+        versionId: string,
+    ): Promise<{ operation_id: string } | null>
+    importArchive(targetId: string): Promise<{ operation_id: string } | null>
     chooseRestoreDirectory(): Promise<string | null>
     listOperations(
         offset?: number,

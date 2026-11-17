@@ -14,6 +14,8 @@ bool supportedEntryType(const QString& type);
 bool supportedVersionFormat(int format);
 // 旧版本可不含元数据；一旦提供就必须完整、合法，否则抛出 Error。
 void validateMetadata(const QJsonObject& entry);
+// 返回受支持属性的规范表示；缺失元数据时返回空对象，非法字段抛出 Error。
+QJsonObject metadataFields(const QJsonObject& entry);
 // Targets are raw bytes, independent of UTF-8 filenames. Rejects
 // NUL/truncation.
 QByteArray symlinkTarget(const QJsonObject& entry);

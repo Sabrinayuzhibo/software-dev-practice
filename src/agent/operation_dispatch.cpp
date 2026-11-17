@@ -9,7 +9,8 @@ using namespace core;
 bool isDataOperation(const QString& action)
 {
     return action == "scan" || action == "backup" || action == "restore" ||
-           action == "delete_version";
+           action == "delete_version" || action == "export_archive" ||
+           action == "import_archive";
 }
 
 QJsonObject executeDataOperation(const QString& action,
@@ -42,6 +43,15 @@ QJsonObject executeDataOperation(const QString& action,
     if (action == "delete_version")
     {
         return deleteVersion(context.args, context.target, progress);
+    }
+    if (action == "export_archive")
+    {
+        return exportArchive(context.args, context.target, context.tasks,
+                             context.targets, context.stateDirectory, progress);
+    }
+    if (action == "import_archive")
+    {
+        return importArchive(context.args, context.target, progress);
     }
     throw Error("Unsupported data operation: " + action);
 }

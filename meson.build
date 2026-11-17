@@ -11,6 +11,7 @@ inc = include_directories('include')
 protocol = static_library('backup-protocol',
   ['src/protocol/frame.cpp', 'src/core/io.cpp', 'src/core/detail_page.cpp',
    'src/core/manifest.cpp', 'src/core/source_scope.cpp',
+   'src/core/version_verifier.cpp', 'src/core/archive.cpp',
    'src/core/backup_filter.cpp',
    'src/core/compression.cpp', 'src/core/compression_algorithm.cpp',
    'src/core/huffman.cpp', 'src/core/lz77.cpp'],
@@ -27,8 +28,11 @@ agent_moc = qt6.compile_moc(
   dependencies: [qt_core, qt_network])
 agent_core = static_library('backup-agent-core',
   ['src/agent/agent_client.cpp', 'src/agent/channel.cpp',
+   'src/agent/control_service.cpp', 'src/agent/realtime.cpp',
    'src/agent/state.cpp', 'src/agent/history.cpp', 'src/agent/restore_journal.cpp',
    'src/agent/operations.cpp', 'src/agent/operation_dispatch.cpp',
+   'src/agent/archive_io.cpp', 'src/agent/archive_export.cpp',
+   'src/agent/archive_import.cpp',
    'src/agent/source_tree.cpp', 'src/agent/source_entries.cpp',
    'src/agent/source_sink.cpp', 'src/agent/metadata_restore.cpp',
    'src/agent/restore_node.cpp',
@@ -156,3 +160,27 @@ test('backup-metadata', python3,
 test('backup-metadata-owners', python3,
   args: [files('tests/backup_metadata_owners.py')[0], agent.full_path(), server.full_path()],
   timeout: 120)
+
+archive_test = executable('archive-test', 'tests/archive_test.cpp',
+  include_directories: inc, dependencies: protocol_dep)
+test('archive-test', archive_test)
+test('backup-archive', python3,
+  args: [files('tests/backup_archive.py')[0], agent.full_path(), server.full_path()],
+  timeout: 240)
+test('archive-faults', python3,
+  args: [files('tests/backup_archive_faults.py')[0], agent.full_path(), server.full_path()],
+  timeout: 120)
+test('archive-disk-full', python3,
+  args: [files('tests/backup_archive_faults.py')[0], agent.full_path(), server.full_path(), '--disk-probe'],
+  timeout: 120)
+test('archive-streaming', python3,
+  args: [files('tests/archive_streaming.py')[0], agent.full_path(), server.full_path()],
+  timeout: 600, is_parallel: false)
+
+
+test('backup-realtime', python3,
+  args: [files('tests/backup_realtime.py')[0], agent.full_path(), server.full_path()],
+  timeout: 180)
+test('realtime-faults', python3,
+  args: [files('tests/backup_realtime_faults.py')[0], agent.full_path(), server.full_path()],
+  timeout: 180)

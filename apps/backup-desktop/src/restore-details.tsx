@@ -1,57 +1,26 @@
 import { GlassButton } from './glass-controls'
-import { useEffect, useRef, useState } from 'react'
+import { usePagedDetails } from './use-paged-details'
 import { RefreshCw } from 'lucide-react'
 import type { RestorePage } from './types'
 import { entryTypeLabels } from './ui'
 
 export function RestoreDetails({ operationId }: { operationId: string }) {
-    const [entries, setEntries] = useState<RestorePage['entries']>([])
-    const [page, setPage] = useState<RestorePage | null>(null)
-    const [error, setError] = useState('')
-    const [loading, setLoading] = useState(false)
-    const pending = useRef(false)
-    const mounted = useRef(true)
-    useEffect(() => {
-        mounted.current = true
-        return () => {
-            mounted.current = false
-        }
-    }, [])
-    async function load(offset: number) {
-        if (pending.current) {
-            return
-        }
-        pending.current = true
-        setLoading(true)
-        setError('')
-        try {
-            const result = await window.backup.getRestoreEntries(
-                operationId,
-                offset,
-            )
-            if (mounted.current) {
-                setEntries((old) =>
-                    offset ? [...old, ...result.entries] : result.entries,
-                )
-                setPage(result)
-            }
-        } catch (failure) {
-            if (mounted.current) {
-                setError(String(failure))
-            }
-        } finally {
-            pending.current = false
-            if (mounted.current) {
-                setLoading(false)
-            }
-        }
-    }
+    const {
+        items: entries,
+        page,
+        loading,
+        error,
+        load,
+    } = usePagedDetails<RestorePage['entries'][number], RestorePage>(
+        (offset) => window.backup.getRestoreEntries(operationId, offset),
+        (page) => page.entries,
+    )
     return (
         <details
             className="restore-details"
             onToggle={(event) => {
                 if (event.currentTarget.open && !page) {
-                    void load(0)
+                    void load()
                 }
             }}
         >
@@ -86,10 +55,7 @@ export function RestoreDetails({ operationId }: { operationId: string }) {
                 </p>
             )}
             {(!page || page.next_offset !== null) && (
-                <GlassButton
-                    disabled={loading}
-                    onClick={() => void load(page?.next_offset || 0)}
-                >
+                <GlassButton disabled={loading} onClick={() => void load()}>
                     <RefreshCw
                         size={14}
                         className={loading ? 'spinning' : ''}

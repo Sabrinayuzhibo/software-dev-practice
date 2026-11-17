@@ -1,3 +1,4 @@
+#include "backup/agent/operation_dispatch.h"
 // JSON-line control bridge. The event thread owns configuration and stdout;
 // one worker performs data operations and persists their progress/results.
 #include <QCommandLineParser>
@@ -218,14 +219,12 @@ class CommandReader final : public QObject
         if (asynchronous)
         {
             action = action.mid(6);
-            require(action == "scan" || action == "backup" ||
-                        action == "restore" || action == "delete_version",
+            require(backup::agent::isDataOperation(action),
                     "Only data operations have an asynchronous start command");
         }
-        require(action == "ping" || action == "versions" ||
-                    action == "version_warnings" || action == "scan" ||
-                    action == "backup" || action == "restore" ||
-                    action == "confirm" || action == "delete_version",
+        require(backup::agent::isDataOperation(action) || action == "ping" ||
+                    action == "versions" || action == "version_warnings" ||
+                    action == "confirm",
                 "Unsupported command");
         QJsonObject task;
         if (action == "backup" ||
@@ -308,8 +307,7 @@ class CommandReader final : public QObject
         const auto tasks = state_.config().value("tasks").toArray();
         const auto targets = state_.config().value("targets").toArray();
         const QString stateDirectory = state_.directory();
-        const bool recorded = action == "scan" || action == "backup" ||
-                              action == "restore" || action == "delete_version";
+        const bool recorded = backup::agent::isDataOperation(action);
         QJsonObject record{
             {"id", newId()},
             {"action", filterPreview ? "filter_preview" : action},
@@ -378,35 +376,12 @@ class CommandReader final : public QObject
                 };
                 try
                 {
-                    if (action == "scan")
+                    if (recorded)
                     {
-                        auto source = args;
-                        if (task.isEmpty())
-                        {
-                            source.insert("path",
-                                          canonicalPath(text(args, "path")));
-                        }
-                        require(!SourceScope(source).overlaps(stateDirectory),
-                                "Source overlaps Agent state");
-                        result = backup::agent::scan(source, progress);
-                    }
-                    else if (action == "backup")
-                    {
-                        require(!SourceScope(task).overlaps(stateDirectory),
-                                "Source overlaps Agent state");
-                        result = backup::agent::backup(
-                            task, target, text(record, "id"), progress);
-                    }
-                    else if (action == "restore")
-                    {
-                        result =
-                            backup::agent::restore(args, target, tasks, targets,
-                                                   stateDirectory, progress);
-                    }
-                    else if (action == "delete_version")
-                    {
-                        result = backup::agent::deleteVersion(args, target,
-                                                              progress);
+                        const backup::agent::OperationContext context{
+                            args, task, target, tasks, targets, stateDirectory};
+                        result = backup::agent::executeDataOperation(
+                            action, context, progress);
                     }
                     else
                     {

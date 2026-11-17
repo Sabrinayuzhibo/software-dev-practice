@@ -1,12 +1,13 @@
 #include "backup/agent/operations.h"
 #include "backup/agent/channel.h"
+#include "backup/agent/source_sink.h"
 #include "backup/agent/source_tree.h"
+#include "backup/agent/worker_support.h"
 #include "backup/core/compression.h"
 #include "backup/core/detail_page.h"
 #include "backup/core/io.h"
 #include "backup/core/source_scope.h"
 
-#include <QThread>
 #include <sys/stat.h>
 
 namespace backup::agent
@@ -17,12 +18,12 @@ QJsonObject scan(const QJsonObject& source, const Progress& progress)
 {
     try
     {
-        return sourceTree(source, nullptr, progress);
+        ScanSourceSink sink;
+        return sourceTree(source, sink, progress);
     }
     catch (const std::exception& failure)
     {
-        require(!QThread::currentThread()->isInterruptionRequested(),
-                "Operation interrupted");
+        checkOperationCancelled();
         return {{"root", source.value("path")},
                 {"files", 0},
                 {"directories", 0},
@@ -84,7 +85,8 @@ QJsonObject backup(const QJsonObject& task, const QJsonObject& target,
     require(!source.hasFilters() ||
                 receipt.value("filters") == source.filters(),
             "Server does not support custom filters; update the Server");
-    auto result = sourceTree(task, &channel, progress);
+    UploadSourceSink sink(channel);
+    auto result = sourceTree(task, sink, progress);
     const auto warnings = result.value("warnings").toArray();
     qint64 warningOffset = 0;
     while (warningOffset < warnings.size())

@@ -166,6 +166,9 @@ export function WorkflowDialogs({ model }: { model: ConsoleModel }) {
                             )}
                         </dd>
                     </dl>
+                    <p className="muted">
+                        将恢复版本中记录的权限、属主和修改时间；旧版本未记录的信息无法补回。权限不足的项目会列为警告。
+                    </p>
                     <label className="restore-location">
                         还原到
                         <div className="directory-input">
@@ -298,6 +301,15 @@ export function OperationPanel({
                         : detail.error}
                 </p>
             )}
+            {succeeded &&
+                detail.action === 'restore' &&
+                !!detail.result?.metadata_warning_count && (
+                    <p className="metadata-warning" role="status">
+                        内容已恢复，元数据未完全恢复。共{' '}
+                        {detail.result.metadata_warning_count}{' '}
+                        项，请查看下方警告中的路径、字段和原因。
+                    </p>
+                )}
             {succeeded && detail.action === 'delete_version' && (
                 <p role="status">所选版本已删除。</p>
             )}
@@ -359,7 +371,10 @@ export function OperationPanel({
                 />
             )}
             {detail.restore_journal && !running && (
-                <RestoreDetails key={detail.id} operationId={detail.id} />
+                <RestoreDetails
+                    key={`restore-${detail.id}`}
+                    operationId={detail.id}
+                />
             )}
         </section>
     )

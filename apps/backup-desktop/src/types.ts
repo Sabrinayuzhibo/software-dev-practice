@@ -75,6 +75,7 @@ export interface Configuration {
 }
 
 export interface Warning {
+    field?: string
     path: string
     reason: string
     type?: string
@@ -96,6 +97,7 @@ export interface ScanResult {
     complete: boolean
     warning_count: number
     error_count?: number
+    metadata_warning_count?: number
     sample: {
         path: string
         type?: string

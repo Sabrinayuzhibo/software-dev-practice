@@ -614,3 +614,86 @@ Windows 测试使用 Win32 `ShowWindowAsync` 和鼠标事件，经 WSLg 到 Elec
 ## 2026-11-12 硬链接关系说明文案
 
 扫描目录树中的“同组文件：”改为“与此文件共享数据：”，同步更新现有桌面文件类型测试的文案预期。只修改显示文字，硬链接识别和存储还原逻辑保持原样。`npm run build --prefix apps/backup-desktop` 和 `git diff --check` 通过；未重复运行功能或完整窗口测试。
+
+## 2026-11-17 FR-12 元数据恢复补齐
+
+执行者：Codex。范围为当前 Linux 文件系统上普通文件、目录、硬链接、软链接、FIFO 的 rwx、UID/GID 和纳秒级 mtime 保存/恢复；软链接权限位、ACL、扩展属性、atime、ctime、特殊权限位及设备内容不在本轮承诺中。本轮未提交 Git。
+
+先使用真实备份还原复现此前问题：17 字节普通文件的权限、UID/GID 正确，但 mtime 从样本设定值变成还原时刻。原因是 `restoreMetadata()` 后的 `syncFile()` 才刷新 Qt 写缓冲。现改为先受检刷新内容，再恢复元数据，随后同步和无覆盖发布。
+
+其他补齐项：硬链接最终验证移到目录权限收紧之前；共享元数据校验器同时验证清单与根目录，明确记录冲突元数据的硬链接被拒绝，旧别名省略元数据时继承代表文件信息。元数据警告不再截断为 100 条，根目录失败与源版本警告共同保存，字段信息随历史记录持久化，已有分页接口读取完整明细。界面显示“内容已恢复，元数据未完全恢复”，警告与还原写入明细使用不同组件 key，能分别展开。
+
+| 命令 / 验证项 | 实际结果 |
+| --- | --- |
+| 修复前 `backup_metadata.py` 实测 | 在 `small.txt` 的纳秒 mtime 比较处失败，保留日志为证据目录中的 `before.log` |
+| `backup-metadata` | 未压缩、Huffman、LZ77 三种版本逐项比较根目录、嵌套/只读/空目录、普通/空/跨块文件、硬链接、外部/悬空软链接及 FIFO 的 rwx/UID/GID/mtime；含纳秒、纪元前时间和当前用户允许的其他属组。内容、链接 inode、链接目标和外部目标不变检查通过 |
+| 受限目录 | 使用有效清单模拟目录最终权限为 0400，硬链接验证在收紧遍历权限前完成，还原成功；测试后仅为样本清理恢复其遍历权限 |
+| 无元数据历史与非法清单 | 缺少元数据的格式 2/3/4 可读；11 组非法/不完整字段、根元数据或硬链接冲突在创建还原目标前拒绝。Server 另拒绝非法根元数据，未发布损坏版本 |
+| 仅测试库注入权限失败 | 对目标文件、根目录、子目录、FIFO、软链接注入属主/权限/时间设置失败；326 项元数据警告与 1 项源 socket 跳过警告完整保留并分页，非目录内容仍一致，Agent 重启后计数及逐项明细不变。生产程序不含故障开关 |
+| `backup-metadata-owners` | 私有 user/mount namespace 中只读绑定真实不同属主文件，无法映射的 UID/GID 实际恢复失败；结果为完成并有警告，明确列出 `foreign` 的 `owner/group`，内容及可恢复的权限/mtime 正确，宿主源文件元数据不变。没有把该场景当作宿主任意 UID 成功恢复的证据 |
+| 桌面元数据专项 | 使用另一合法属主的版本元数据制造当前用户真实权限失败；验证还原内容、根目录和文件警告、明确提示、警告/写入明细独立展开、重新加载后查询，专项通过 |
+
+首次完整构建中 19/21 个套件通过、2 个失败，失败为 `backup-file-types` 和 `backup-file-type-mounts`。它们的旧兼容清单允许代表文件有元数据、别名没有元数据；最初校验过严而提前拒绝。现保留该兼容，只拒绝别名明确记录的冲突元数据。没有删除原用例或降低其路径、类型、跨设备验证要求。
+
+测试脚本开发中曾在生成格式 4 无元数据样本后误写回旧清单摘要，导致摘要校验失败；修正生成顺序后历史兼容检查通过。最初 `field` 在历史记录规范化时被丢弃，已补齐可选字段持久化并验证重启后的完整明细。
+
+证据目录：`/home/jjj/course/cpp/backup-metadata-20261117-evidence/`；独立保留的样本与还原目录：`/home/jjj/course/cpp/backup-metadata-20261117-verified/`。`before.log`、`build-first.log`、`focused.log`、`verified.log`、`window-focused.log` 分别记录复现、首轮完整构建、新专项、独立实测和桌面专项。
+
+本节补齐此前记录的普通文件修改时间问题；此前测试记录保留当时实际结果，不应再将其“尚未实现”作为当前结论。旧版本未记录的元数据无法补回，不自动提权；未验证物理掉电、任意文件系统、ACL/xattr 或百万条目规模。
+
+最终验证补充：
+
+| 命令 | 结果 |
+| --- | --- |
+| `./scripts/build.sh`（修正旧硬链接兼容后） | C++ 构建、21/21 个 Meson 套件及桌面端构建通过，0 失败、0 跳过、0 超时。1 GiB 压缩流式套件通过，265.65 秒。完整日志为 `build-passed.log` |
+| 最后增加节点权限设置的 `AT_SYMLINK_NOFOLLOW` 后，加载 Qt 环境重新编译并运行 `meson test -C build backup-metadata backup-metadata-owners backup-file-types backup-file-type-mounts backup-integration backup-compression --print-errorlogs` | 最终二进制补验 6/6 通过，覆盖元数据、实际属主权限失败、字符/块设备挂载与跨设备边界、基础还原和两种压缩。没有把这次六套件写成再次运行完整 21 套件 |
+| 加载 Qt 环境运行 `backup_filter_acceptance.py`，输出到 `/home/jjj/course/cpp/backup-filter-metadata-20261117` | 33 组筛选及 2 组压缩组合再次通过，普通文件和硬链接成员还原后的 mtime 改为强制断言，全部一致；重启后历史版本还原通过，结果记录 `mtime_verified: true` |
+| 格式 / 语法 | clang-format 18.1.8 格式化本轮 C++ 修改行和新增故障库，保留无关旧代码；Black 检查两个新增 Python 专项，Python 语法、桌面改动 Prettier 和 `git diff --check` 通过 |
+
+完整窗口回归首轮中，元数据用例及全部已有功能用例均通过，但最后最小化后的 500 毫秒后台计时器断言失败，因此该次完整窗口运行不记为通过。专项末尾会重载页面，已在窗口后台计时检查前等待现有 `requireGlass()` 确认页面渲染就绪；没有修改应用后台参数，也没有放宽 500 毫秒断言。首轮日志保留为 `window-first.log`。
+
+第二次完整窗口运行增加窄窗几何检查时，直接比较面板 `scrollWidth/clientWidth`，误将玻璃按钮向外延伸的阴影画布视作内容溢出；诊断中唯一超界节点是该画布。已改为检查页面宽度、提示文字及原生控件的实际边界，未修改应用布局。1120×760、850×600 专项均通过，并已查看截图确认文字和操作可见。日志为 `window-layout-first.log`、`window-layout-passed.log`，截图为证据目录中的 `backup-metadata-1120.png`、`backup-metadata-850.png`。
+
+最后执行 `npm run test:window --prefix apps/backup-desktop`：完整窗口回归通过，退出码 0。包含既有全部窗口/玻璃、扫描、备份还原、版本删除、压缩、自定义筛选和目录树场景，以及新增元数据真实属主失败、两种尺寸、完整警告/写入明细独立展开、重载持久化。后台 500 毫秒计时、窗口恢复和关闭检查通过；这不构成对首轮单次时序失败根因的证明。最终日志为 `window-passed.log`，临时专项脚本已移除。
+
+## 2026-11-17 虚接口与模块职责重构
+
+本节记录初版接口方案及当时结果；后续精简方案和本轮验证见下一节，当前模块结构以[接口说明](architecture-refactoring.md)为准。
+
+依据 [huawei-coding](../.agents/skills/huawei-coding/SKILL.md) 检查自写模块，新增 `ISourceSink`、`IMetadataTarget`、`IRestoreNode`、`IAgentOperation` 四组接口；保留已有压缩及六类筛选接口，拆分遍历状态/条目编码，合并前端惰性分页 Hook。职责、生命周期与各模块的处理依据见[接口说明](architecture-refactoring.md)。
+
+以本轮开始时的工作区为基线保存源码副本和 SHA-256，保留此前未提交的元数据功能。没有更改界面布局、协议格式、存储格式和功能需求，没有修改第三方玻璃渲染源码，也没有执行 Git 提交。
+
+测试版本为 `42f5195` 上的本轮未提交工作区，包含此前的元数据补全。Agent/Server 从当前源码构建；窗口运行于本机 Wayland / SwiftShader，不能将结果写成 WSLg 宿主原生输入或其他平台已验收。
+
+| 验证 | 实际结果 |
+| --- | --- |
+| 加载 Qt 环境编译，执行 `meson test -C build agent-strategy-test backup-metadata backup-metadata-owners backup-file-types backup-file-type-mounts backup-custom-filter backup-sources version-deletion --print-errorlogs` | 首轮 7/8 通过：既有七个集成套件通过，新增单元夹具遗漏 `metadata_warning_count` 初始化而失败。补齐夹具中接口约定的统计字段后，`agent-strategy-test` 单独通过；没有放宽生产校验 |
+| `agent-strategy-test` | 经基类调用真实分块遍历和扫描任务，核对跨块内容、摘要、硬链接只发送一份内容及统计；验证新建目录/软链接/FIFO、拒绝覆盖与未知类型、来源/状态目录重叠拒绝；替代元数据目标验证属主→权限→时间顺序、纪元前纳秒时间、部分失败继续、字段完整及旧版本缺失信息跳过 |
+| `npm run test:bridge --prefix apps/backup-desktop` | 通过；超大 UTF-8 响应只影响自身请求，Agent、后台工作和后续请求仍可用 |
+| `./scripts/build.sh` | 退出码 0；C++ 构建、22/22 个 Meson 套件、TypeScript 和 Vite 构建通过，0 失败、0 跳过、0 超时。1 GiB 压缩流式测试通过，276.69 秒；没有新增编译告警 |
+| 补充真实查询命令工厂边界后重编 `agent-strategy-test` 并直接运行 | 退出码 0；`versions`、`ping`、`confirm` 及未知命令均留给查询入口，四种数据操作工厂仍可用。本次只增加测试断言，没有更改应用代码 |
+| `npm run test:window --prefix apps/backup-desktop` | 完整窗口回归通过，退出码 0。覆盖既有玻璃/控件与窗口检查、扫描/备份/还原、来源与类型选择、删除、Huffman/LZ77、自定义筛选、目录树和元数据专项；201 条警告按 100/100/1 分页，无重复遗漏。真实属主失败、警告与写入明细独立展开、重载查询、500 毫秒后台计时和关闭检查通过 |
+| 格式与静态检查 | 新模块和新测试通过 clang-format 18.1.8 `--dry-run --Werror`；前端三文件 Prettier、TypeScript/桌面构建及 `git diff --check` 通过；说明文档的相对链接存在。新增单元里字符串临时对象触发的 GCC 引用寿命告警改用具名参数消除，没有屏蔽告警 |
+
+完整日志保留在 `/home/jjj/course/cpp/backup-engineering-20261117-evidence/`：`build.log`、`backend-testlog.txt`、`window.log`、`bridge.log`、`focused.log`、`unit-final.log` 分别记录完整构建/后端、窗口、桥接、首轮专项及修正后的单元结果；另有基线/最终源码哈希及专项截图。
+
+接口测试不等于全路径覆盖，不据此宣称实现实时备份、加密、归档、远端 TLS，或完成物理掉电与任意文件系统验证。
+
+## 2026-11-17 接口精简（当前方案）
+
+按实际替换需求保留 `ICompressionAlgorithm`、`IBackupFilter`、`ISourceSink`，移除初版的 `IAgentOperation`、`IRestoreNode`、`IMetadataTarget`。任务使用普通函数分发及统一白名单，特殊节点使用函数和返回结构，元数据两条系统调用路径共用字段解析与警告汇总。独立模块、RAII、无覆盖发布、恢复顺序及错误语义继续保留，详见[当前接口说明](architecture-refactoring.md)。
+
+本轮以 `/tmp/backup-before-interface-trim-dk3lyauq/` 的工作区快照为基线。保留的三组虚接口、来源遍历/编码模块及 Electron/React 源码哈希不变，先前未提交的元数据功能及界面修改继续保留；没有执行 Git 提交。原 `agent-strategy-test` 按当前职责更名为 `agent-module-test`，旧名称及初版窗口结果仅属于上一节的历史记录。
+
+| 命令 / 检查 | 实际结果 |
+| --- | --- |
+| 加载 Qt 环境编译，并执行 `meson test -C build agent-module-test backup-metadata backup-metadata-owners backup-file-types backup-file-type-mounts backup-integration version-deletion --print-errorlogs` | 7/7 通过。覆盖实际元数据恢复/权限失败、设备挂载边界、基本备份还原、特殊节点及版本删除 |
+| `agent-module-test` | 保留经虚接口观察真实分块读取、硬链接与扫描失败汇总；改为直接测试任务分类/分发、拒绝查询和未知数据命令、来源/状态目录重叠、节点创建及拒绝覆盖。元数据使用真实文件 fd 和软链接，核对权限、属主、纪元前纳秒 mtime、不跟随链接、坏 fd 的三字段完整失败以及历史缺失字段跳过 |
+| `npm run test:bridge --prefix apps/backup-desktop` | 通过；超大 UTF-8 响应只影响该请求，后续请求与后台工作继续 |
+| `./scripts/build.sh` | 退出码 0；精简后的 C++ 构建、22/22 个 Meson 套件、TypeScript 和 Vite 构建全部通过，0 失败、0 跳过、0 超时，无新增编译告警。1 GiB 压缩流式测试通过，288.53 秒 |
+| 格式与引用 | 精简的头文件、实现、测试通过 clang-format 18.1.8 `--dry-run --Werror`，主程序/还原调用只格式化修改行；`git diff --check` 通过，当前说明文档的相对链接存在，生产代码已无三组被移除接口及旧工厂的引用 |
+
+证据保留在 `/home/jjj/course/cpp/backup-interface-trim-20261117-evidence/`：完整构建、后端原始测试日志、首轮专项、桥接及编译日志，以及本轮开始前和最终源码哈希。改动范围核对只包含计划内的 11 个既有文件修改和 3 个模块/测试文件改名，其他基线文件保持不变。
+
+本轮未重复完整窗口回归：Electron/React、IPC 字段和布局均未修改，上一次窗口回归结果保留在上一节，不作为精简后再次运行窗口测试的证据。变化的 C++ 路径由本轮模块及真实进程集成测试验证；当前机器以外的平台、物理掉电和百万条目仍未验收。

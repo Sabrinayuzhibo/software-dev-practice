@@ -40,6 +40,30 @@ QByteArray symlinkTarget(const QJsonObject& entry)
     return decoded.decoded;
 }
 
+void validateMetadata(const QJsonObject& entry)
+{
+    const auto path = entry.value("path").toString(".");
+    const QStringList metadataFields{"mode", "uid", "gid", "mtime_sec",
+                                     "mtime_nsec"};
+    const auto metadataCount = std::count_if(
+        metadataFields.cbegin(), metadataFields.cend(),
+        [&entry](const QString& field) { return entry.contains(field); });
+    require(metadataCount == 0 || metadataCount == metadataFields.size(),
+            "Incomplete file metadata: " + path);
+    if (metadataCount != 0)
+    {
+        const auto mode = number(entry, "mode");
+        const auto uid = number(entry, "uid");
+        const auto gid = number(entry, "gid");
+        signedNumber(entry, "mtime_sec");
+        const auto nanoseconds = number(entry, "mtime_nsec");
+        require(mode <= 0777 && uid <= std::numeric_limits<uid_t>::max() &&
+                    gid <= std::numeric_limits<gid_t>::max() &&
+                    nanoseconds < 1000000000,
+                "Invalid file metadata: " + path);
+    }
+}
+
 void Manifest::checkPath(const QString& path) const
 {
     require(validPath(path) && !paths_.contains(path),
@@ -89,25 +113,7 @@ void Manifest::append(const QJsonObject& entry, int format)
          type == "symlink" || type == "fifo" || type == "character_device" ||
          type == "block_device"))
     {
-        const QStringList metadataFields{"mode", "uid", "gid", "mtime_sec",
-                                         "mtime_nsec"};
-        const auto metadataCount = std::count_if(
-            metadataFields.cbegin(), metadataFields.cend(),
-            [&entry](const QString& field) { return entry.contains(field); });
-        require(metadataCount == 0 || metadataCount == metadataFields.size(),
-                "Incomplete file metadata: " + path);
-        if (metadataCount != 0)
-        {
-            const auto mode = number(entry, "mode");
-            const auto uid = number(entry, "uid");
-            const auto gid = number(entry, "gid");
-            signedNumber(entry, "mtime_sec");
-            const auto nanoseconds = number(entry, "mtime_nsec");
-            require(mode <= 0777 && uid <= std::numeric_limits<uid_t>::max() &&
-                        gid <= std::numeric_limits<gid_t>::max() &&
-                        nanoseconds < 1000000000,
-                    "Invalid file metadata: " + path);
-        }
+        validateMetadata(entry);
     }
     else
     {
@@ -162,6 +168,17 @@ void Manifest::append(const QJsonObject& entry, int format)
                         number(anchor, "size") == size &&
                         anchor.value("sha256") == entry.value("sha256"),
                     "Invalid hard link reference: " + path);
+            for (const auto* field :
+                 {"mode", "uid", "gid", "mtime_sec", "mtime_nsec"})
+            {
+                const auto key = QLatin1String(field);
+                // 旧清单允许别名不记录元数据，此时沿用代表文件的信息。
+                require(!entry.contains(key) ||
+                            (anchor.contains(key) &&
+                             signedNumber(anchor, field) ==
+                                 signedNumber(entry, field)),
+                        "Hard link metadata differs from anchor: " + path);
+            }
             ++hardlinks_;
         }
         else

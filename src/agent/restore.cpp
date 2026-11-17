@@ -1,6 +1,9 @@
 #include "backup/agent/channel.h"
+#include "backup/agent/metadata_restore.h"
 #include "backup/agent/operations.h"
 #include "backup/agent/restore_journal.h"
+#include "backup/agent/restore_node.h"
+#include "backup/agent/worker_support.h"
 #include "backup/core/compression.h"
 #include "backup/core/io.h"
 #include "backup/core/manifest.h"
@@ -11,13 +14,8 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QTemporaryFile>
-#include <QThread>
-#include <cstddef>
 #include <cstring>
 #include <fcntl.h>
-#include <sys/socket.h>
-#include <sys/sysmacros.h>
-#include <sys/un.h>
 #include <unistd.h>
 
 namespace backup::agent
@@ -25,17 +23,19 @@ namespace backup::agent
 using namespace core;
 namespace
 {
-void checkCancelled()
-{
-    require(!QThread::currentThread()->isInterruptionRequested(),
-            "Operation interrupted");
-}
-
 void fetchManifest(Channel& channel, const QString& versionId,
                    const QJsonObject& summary, QTemporaryFile& output)
 {
     const auto format = summary.value("format").toInt();
     require(supportedVersionFormat(format), "Unsupported version format");
+    if (summary.contains("root_metadata"))
+    {
+        require(summary.value("root_metadata").isObject(),
+                "Invalid source root metadata");
+        const auto metadata = summary.value("root_metadata").toObject();
+        require(metadata.contains("mode"), "Missing source root metadata");
+        validateMetadata(metadata);
+    }
     Manifest catalog;
     QSet<QString> allowedEmptyDirectories;
     const SourceScope scope(summary, "source");
@@ -43,7 +43,7 @@ void fetchManifest(Channel& channel, const QString& versionId,
     qint64 offset = 0;
     while (true)
     {
-        checkCancelled();
+        checkOperationCancelled();
         const auto page =
             channel.call("entries", {{"version_id", versionId},
                                      {"offset", QString::number(offset)}});
@@ -128,80 +128,6 @@ void publishFile(int descriptor, int parent, const QByteArray& leaf)
                              QString::fromLocal8Bit(strerror(errno)));
 }
 
-void metadataWarning(QJsonObject& status, const QString& path,
-                     const QString& field, int error)
-{
-    const auto count = number(status, "metadata_warning_count") + 1;
-    status.insert("metadata_warning_count", count);
-    auto warnings = status.value("warnings").toArray();
-    if (warnings.size() < 100)
-    {
-        warnings.append(QJsonObject{
-            {"path", path},
-            {"type", "metadata"},
-            {"reason", field + ": " + QString::fromLocal8Bit(strerror(error))}});
-        status.insert("warnings", warnings);
-    }
-}
-
-void restoreMetadata(int descriptor, const QJsonObject& entry,
-                     QJsonObject& status)
-{
-    if (!entry.contains("mode"))
-    {
-        return;
-    }
-    const auto path = text(entry, "path");
-    if (::fchown(descriptor, static_cast<uid_t>(number(entry, "uid")),
-                 static_cast<gid_t>(number(entry, "gid"))) != 0)
-    {
-        metadataWarning(status, path, "owner/group", errno);
-    }
-    if (::fchmod(descriptor, static_cast<mode_t>(number(entry, "mode"))) != 0)
-    {
-        metadataWarning(status, path, "permissions", errno);
-    }
-    const timespec times[2] = {
-        {0, UTIME_OMIT},
-        {static_cast<time_t>(signedNumber(entry, "mtime_sec")),
-         static_cast<long>(number(entry, "mtime_nsec"))}};
-    if (::futimens(descriptor, times) != 0)
-    {
-        metadataWarning(status, path, "modification time", errno);
-    }
-}
-
-void restoreMetadataAt(int parent, const QByteArray& leaf,
-                       const QJsonObject& entry, QJsonObject& status)
-{
-    if (!entry.contains("mode"))
-    {
-        return;
-    }
-    const auto path = text(entry, "path");
-    if (::fchownat(parent, leaf.constData(),
-                   static_cast<uid_t>(number(entry, "uid")),
-                   static_cast<gid_t>(number(entry, "gid")),
-                   AT_SYMLINK_NOFOLLOW) != 0)
-    {
-        metadataWarning(status, path, "owner/group", errno);
-    }
-    if (text(entry, "type") != "symlink" &&
-        ::fchmodat(parent, leaf.constData(),
-                   static_cast<mode_t>(number(entry, "mode")), 0) != 0)
-    {
-        metadataWarning(status, path, "permissions", errno);
-    }
-    const timespec times[2] = {
-        {0, UTIME_OMIT},
-        {static_cast<time_t>(signedNumber(entry, "mtime_sec")),
-         static_cast<long>(number(entry, "mtime_nsec"))}};
-    if (::utimensat(parent, leaf.constData(), times, AT_SYMLINK_NOFOLLOW) != 0)
-    {
-        metadataWarning(status, path, "modification time", errno);
-    }
-}
-
 struct stat restoreFile(Channel& channel, const QString& versionId, int parent,
                         const QByteArray& leaf, const QJsonObject& entry,
                         const QByteArray& temporary, QJsonObject& status,
@@ -236,7 +162,7 @@ struct stat restoreFile(Channel& channel, const QString& versionId, int parent,
         };
         while (true)
         {
-            checkCancelled();
+            checkOperationCancelled();
             const auto reply =
                 channel.call("download", {{"version_id", versionId},
                                           {"index", entry.value("index")},
@@ -265,7 +191,7 @@ struct stat restoreFile(Channel& channel, const QString& versionId, int parent,
                         "Compressed block buffer exceeds supported size");
                 while (pending.size() >= kCompressionHeaderBytes)
                 {
-                    checkCancelled();
+                    checkOperationCancelled();
                     const auto frameSize =
                         compressionBlockSize(pending, compression);
                     if (pending.size() < frameSize)
@@ -293,7 +219,10 @@ struct stat restoreFile(Channel& channel, const QString& versionId, int parent,
                     QString::fromLatin1(storedHash.result().toHex()) ==
                         text(entry, "stored_sha256"),
                 "Compressed file checksum mismatch");
-        restoreMetadata(descriptor.get(), entry, status);
+        // 先刷新 Qt 写缓冲，避免后续写入覆盖已恢复的修改时间。
+        require(file.flush(),
+                "Cannot flush restored content: " + text(entry, "path"));
+        restoreDescriptorMetadata(descriptor.get(), entry, status);
         syncFile(file);
         publishFile(descriptor.get(), parent, leaf);
         require(::unlinkat(parent, temporary.constData(), 0) == 0 &&
@@ -341,48 +270,6 @@ void restoreHardlink(int root, int parent, const QByteArray& leaf,
     groups.insert(anchor, after);
 }
 
-void restoreSocket(int parent, const QByteArray& leaf)
-{
-    Descriptor socket(::socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0));
-    const auto temporary = (".backup-" + newId()).toUtf8();
-    const auto pinned = "/proc/self/fd/" + QByteArray::number(parent) + '/' +
-                        temporary;
-    sockaddr_un address{};
-    address.sun_family = AF_UNIX;
-    require(pinned.size() <
-                static_cast<qsizetype>(sizeof(address.sun_path)),
-            "Cannot create restored socket path");
-    std::memcpy(address.sun_path, pinned.constData(), pinned.size() + 1);
-    const auto bound =
-        ::bind(socket.get(), reinterpret_cast<sockaddr*>(&address),
-               offsetof(sockaddr_un, sun_path) + pinned.size() + 1);
-    const auto bindError = errno;
-    require(bound == 0, "Cannot create restored socket: " +
-                            QString::fromLocal8Bit(strerror(bindError)));
-    try
-    {
-        const auto protectedNode =
-            ::fchmodat(parent, temporary.constData(), 0600,
-                       AT_SYMLINK_NOFOLLOW);
-        const auto protectError = errno;
-        require(protectedNode == 0,
-                "Cannot protect restored socket: " +
-                    QString::fromLocal8Bit(strerror(protectError)));
-        const auto published =
-            ::renameat2(parent, temporary.constData(), parent,
-                        leaf.constData(), RENAME_NOREPLACE);
-        const auto publishError = errno;
-        require(published == 0,
-                "Cannot publish restored socket: " +
-                    QString::fromLocal8Bit(strerror(publishError)));
-    }
-    catch (...)
-    {
-        ::unlinkat(parent, temporary.constData(), 0);
-        throw;
-    }
-}
-
 QJsonObject restoreTree(Channel& channel, const QString& versionId,
                         QTemporaryFile& manifest, int root,
                         RestoreJournal& journal, const QString& destination,
@@ -401,7 +288,7 @@ QJsonObject restoreTree(Channel& channel, const QString& versionId,
     QVector<QJsonObject> directories;
     while (!manifest.atEnd())
     {
-        checkCancelled();
+        checkOperationCancelled();
         const auto entry = parseObject(manifest.readLine(64 * 1024));
         const QString path = text(entry, "path");
         const auto type = text(entry, "type");
@@ -422,6 +309,7 @@ QJsonObject restoreTree(Channel& channel, const QString& versionId,
                                   QString::fromUtf8(temporary));
             }
             journal.record(intent, "pending");
+            const char* counter = "files";
             if (type == "file")
             {
                 const auto info =
@@ -443,82 +331,19 @@ QJsonObject restoreTree(Channel& channel, const QString& versionId,
             }
             else
             {
-                int result = -1;
-                if (type == "directory")
-                {
-                    result = ::mkdirat(directory.get(), leaf.constData(), 0700);
-                }
-                else if (type == "symlink")
-                {
-                    const auto target = symlinkTarget(entry);
-                    result = ::symlinkat(target.constData(), directory.get(),
-                                         leaf.constData());
-                }
-                else if (type == "fifo")
-                {
-                    result =
-                        ::mkfifoat(directory.get(), leaf.constData(), 0600);
-                }
-                else if (type == "character_device" ||
-                         type == "block_device")
-                {
-                    const auto identifier = makedev(
-                        static_cast<unsigned int>(number(entry, "device_major")),
-                        static_cast<unsigned int>(number(entry, "device_minor")));
-                    const auto mode =
-                        type == "character_device" ? S_IFCHR : S_IFBLK;
-                    result = ::mknodat(directory.get(), leaf.constData(),
-                                      mode | 0600, identifier);
-                }
-                else if (type == "socket")
-                {
-                    restoreSocket(directory.get(), leaf);
-                    result = 0;
-                }
-                require(result == 0,
-                        "Cannot restore " + type + ": " +
-                            QString::fromLocal8Bit(strerror(errno)));
-                if (type == "character_device" || type == "block_device" ||
-                    type == "socket")
-                {
-                    struct stat restored{};
-                    require(::fstatat(directory.get(), leaf.constData(),
-                                      &restored, AT_SYMLINK_NOFOLLOW) == 0 &&
-                                ((type == "socket" &&
-                                  S_ISSOCK(restored.st_mode)) ||
-                                 (type == "character_device" &&
-                                  S_ISCHR(restored.st_mode)) ||
-                                 (type == "block_device" &&
-                                  S_ISBLK(restored.st_mode))),
-                            "Restored node type changed: " + path);
-                    if (type != "socket")
-                    {
-                        require(major(restored.st_rdev) ==
-                                        number(entry, "device_major") &&
-                                    minor(restored.st_rdev) ==
-                                        number(entry, "device_minor"),
-                                "Restored device number changed: " + path);
-                    }
-                }
+                const auto result = restoreNode(directory.get(), leaf, entry);
                 require(::fsync(directory.get()) == 0,
                         "Cannot persist restored " + type);
-                if (type == "directory")
+                counter = result.counter;
+                if (result.metadata == MetadataTiming::Deferred)
                 {
                     directories.append(entry);
                 }
-                else if (type == "symlink" || type == "fifo")
+                else if (result.metadata == MetadataTiming::Immediate)
                 {
-                    restoreMetadataAt(directory.get(), leaf, entry, status);
+                    restorePathMetadata(directory.get(), leaf, entry, status);
                 }
             }
-            const auto counter = type == "directory" ? "directories"
-                                 : type == "symlink" ? "symlinks"
-                                 : type == "fifo"    ? "fifos"
-                                 : type == "character_device"
-                                     ? "character_devices"
-                                 : type == "block_device" ? "block_devices"
-                                 : type == "socket"       ? "sockets"
-                                                     : "files";
             status.insert(QLatin1String(counter), number(status, counter) + 1);
             journal.record(entry, "written");
             progress(status);
@@ -529,6 +354,15 @@ QJsonObject restoreTree(Channel& channel, const QString& versionId,
                         "; partial restore at " + destination);
         }
     }
+    // 在收紧目录的属主/遍历权限前验证硬链接，之后不再按路径访问后代。
+    for (auto member = members.begin(); member != members.end(); ++member)
+    {
+        checkOperationCancelled();
+        require(sameFileState(groups.value(member.value()),
+                              statBelow(root, member.key())),
+                "Restored hard link member changed: " + member.key() +
+                    "; partial restore at " + destination);
+    }
     for (auto item = directories.crbegin(); item != directories.crend(); ++item)
     {
         const auto path = text(*item, "path");
@@ -536,22 +370,10 @@ QJsonObject restoreTree(Channel& channel, const QString& versionId,
         Descriptor parent(slash < 0 ? ::dup(root)
                                     : openBelow(root, path.left(slash),
                                                 O_RDONLY | O_DIRECTORY));
-        restoreMetadataAt(parent.get(), path.mid(slash + 1).toUtf8(), *item,
-                          status);
+        restorePathMetadata(parent.get(), path.mid(slash + 1).toUtf8(), *item,
+                            status);
         require(::fsync(parent.get()) == 0,
                 "Cannot persist restored directory metadata: " + path);
-    }
-    if (number(status, "metadata_warning_count") > 0)
-    {
-        status.insert("warning_count", number(status, "metadata_warning_count"));
-    }
-    for (auto member = members.begin(); member != members.end(); ++member)
-    {
-        checkCancelled();
-        require(sameFileState(groups.value(member.value()),
-                              statBelow(root, member.key())),
-                "Restored hard link member changed: " + member.key() +
-                    "; partial restore at " + destination);
     }
     return status;
 }
@@ -628,11 +450,11 @@ QJsonObject restore(const QJsonObject& args, const QJsonObject& target,
     {
         auto metadata = summary.value("root_metadata").toObject();
         metadata.insert("path", ".");
-        restoreMetadata(root.get(), metadata, status);
+        restoreDescriptorMetadata(root.get(), metadata, status);
     }
     require(::fsync(root.get()) == 0 && ::fsync(parent.get()) == 0,
             "Cannot persist restored tree");
-    QJsonArray warnings;
+    auto warnings = status.value("warnings").toArray();
     qint64 offset = 0;
     do
     {
@@ -647,15 +469,9 @@ QJsonObject restore(const QJsonObject& args, const QJsonObject& target,
                      ? -1
                      : number(page, "next_offset");
     } while (offset >= 0);
-    auto restoreWarnings = status.value("warnings").toArray();
-    for (const auto& warning : warnings)
-    {
-        if (restoreWarnings.size() < 100)
-        {
-            restoreWarnings.append(warning);
-        }
-    }
-    status.insert("warnings", restoreWarnings);
+    // 包含根目录失败和版本原有警告；完整明细交给现有历史存储分页。
+    status.insert("warnings", warnings);
+    status.insert("warning_count", warnings.size());
     return status;
 }
 } // namespace backup::agent

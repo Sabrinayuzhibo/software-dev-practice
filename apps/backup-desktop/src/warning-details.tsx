@@ -1,9 +1,9 @@
 import { GlassButton } from './glass-controls'
-import { useEffect, useRef, useState } from 'react'
+import { usePagedDetails } from './use-paged-details'
 import { RefreshCw } from 'lucide-react'
 import type { Warning, WarningPage } from './types'
 
-// Key by operation ID at the call site so a new scan starts with a fresh page.
+// 调用处按操作 ID 设置 key，新的扫描从第一页开始。
 export function WarningDetails({
     operationId,
     loadPage,
@@ -17,48 +17,19 @@ export function WarningDetails({
     className?: string
     label?: string
 }) {
-    const [warnings, setWarnings] = useState<Warning[]>([])
-    const [nextOffset, setNextOffset] = useState<number | null>(0)
-    const [loading, setLoading] = useState(false)
-    const [error, setError] = useState('')
-    const pending = useRef(false)
-    const mounted = useRef(true)
-    useEffect(() => {
-        mounted.current = true
-        return () => {
-            mounted.current = false
-        }
-    }, [])
-
-    async function load() {
-        if (pending.current || nextOffset === null) {
-            return
-        }
-        pending.current = true
-        setLoading(true)
-        setError('')
-        try {
-            const page = loadPage
-                ? await loadPage(nextOffset)
-                : await window.backup.getOperationWarnings(
-                      operationId!,
-                      nextOffset,
-                  )
-            if (mounted.current) {
-                setWarnings((old) => [...old, ...page.warnings])
-                setNextOffset(page.next_offset)
-            }
-        } catch (failure) {
-            if (mounted.current) {
-                setError(String(failure))
-            }
-        } finally {
-            pending.current = false
-            if (mounted.current) {
-                setLoading(false)
-            }
-        }
-    }
+    const {
+        items: warnings,
+        nextOffset,
+        loading,
+        error,
+        load,
+    } = usePagedDetails<Warning, WarningPage>(
+        (offset) =>
+            loadPage
+                ? loadPage(offset)
+                : window.backup.getOperationWarnings(operationId!, offset),
+        (page) => page.warnings,
+    )
 
     return (
         <details

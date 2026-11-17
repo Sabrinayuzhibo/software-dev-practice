@@ -28,7 +28,11 @@ agent_moc = qt6.compile_moc(
 agent_core = static_library('backup-agent-core',
   ['src/agent/agent_client.cpp', 'src/agent/channel.cpp',
    'src/agent/state.cpp', 'src/agent/history.cpp', 'src/agent/restore_journal.cpp',
-   'src/agent/operations.cpp', 'src/agent/source_tree.cpp', 'src/agent/source_selection.cpp',
+   'src/agent/operations.cpp', 'src/agent/operation_dispatch.cpp',
+   'src/agent/source_tree.cpp', 'src/agent/source_entries.cpp',
+   'src/agent/source_sink.cpp', 'src/agent/metadata_restore.cpp',
+   'src/agent/restore_node.cpp',
+   'src/agent/source_selection.cpp',
    'src/agent/restore.cpp', 'src/agent/version_deletion.cpp', agent_moc],
   include_directories: inc,
   dependencies: [protocol_dep, qt_network])
@@ -77,6 +81,11 @@ test('compression-test', compression_test)
 filter_test = executable('backup-filter-test', 'tests/backup_filter_test.cpp',
   include_directories: inc, dependencies: protocol_dep)
 test('backup-filter-test', filter_test)
+
+agent_module_test = executable('agent-module-test',
+  'tests/agent_module_test.cpp',
+  include_directories: inc, dependencies: agent_dep)
+test('agent-module-test', agent_module_test)
 
 python3 = find_program('python3')
 integration_test = files('tests/server_integration.py')[0]
@@ -136,3 +145,14 @@ test('backup-compression', python3,
 test('compression-streaming', python3,
   args: [files('tests/compression_streaming.py')[0], agent.full_path(), server.full_path()],
   timeout: 600)
+
+metadata_faults = shared_library('metadata-syscall-faults',
+  'tests/metadata_syscall_faults.cpp',
+  dependencies: meson.get_compiler('cpp').find_library('dl'))
+test('backup-metadata', python3,
+  args: [files('tests/backup_metadata.py')[0], agent.full_path(), server.full_path(),
+         metadata_faults.full_path()],
+  timeout: 120)
+test('backup-metadata-owners', python3,
+  args: [files('tests/backup_metadata_owners.py')[0], agent.full_path(), server.full_path()],
+  timeout: 120)

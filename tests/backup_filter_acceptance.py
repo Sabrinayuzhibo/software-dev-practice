@@ -128,14 +128,12 @@ def verify_case(fixture, task, source, label, rules, expected):
     restored = tree(destination)
     actual = {p for p, value in restored.items() if value != "directory"}
     assert actual == expected, (label, "restore", actual, expected)
-    metadata_differences = []
     by_path = {entry["path"]: entry for entry in manifest}
     for path in expected:
         assert restored[path] == original[path], (label, "content/type", path)
         if (source / path).is_file() and not (source / path).is_symlink():
             assert int(by_path[path]["mtime_sec"]) == (source / path).stat().st_mtime_ns // 10**9
-            if (destination / path).stat().st_mtime_ns != (source / path).stat().st_mtime_ns:
-                metadata_differences.append(path)
+            assert (destination / path).stat().st_mtime_ns == (source / path).stat().st_mtime_ns, (label, "mtime", path)
     if label in ("01-all", "08-type-hardlink"):
         assert (destination / "docs/a.txt").stat().st_ino == (destination / "docs/a-hard.txt").stat().st_ino
     if label == "01-all":
@@ -146,7 +144,7 @@ def verify_case(fixture, task, source, label, rules, expected):
         assert restored == {"中文 目录": "directory", "中文 目录/空目录": "directory"}
     result = {"case": label, "filters": rules, "expected": sorted(expected),
               "actual": sorted(actual), "version": version["id"], "passed": True,
-              "restore_mtime_not_preserved": sorted(metadata_differences)}
+              "mtime_verified": True}
     print(f"PASS {label}: {len(expected)} 个非目录条目", flush=True)
     return result
 

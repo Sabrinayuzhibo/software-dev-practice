@@ -300,16 +300,11 @@ QJsonObject Repository::begin(const QJsonObject& request)
     }
     if (request.contains("root_metadata"))
     {
-        const auto metadata = request.value("root_metadata").toObject();
-        const auto mode = number(metadata, "mode");
-        const auto uid = number(metadata, "uid");
-        const auto gid = number(metadata, "gid");
-        const auto nanoseconds = number(metadata, "mtime_nsec");
-        signedNumber(metadata, "mtime_sec");
-        require(mode <= 0777 && uid <= std::numeric_limits<uid_t>::max() &&
-                    gid <= std::numeric_limits<gid_t>::max() &&
-                    nanoseconds < 1000000000,
+        require(request.value("root_metadata").isObject(),
                 "Invalid source root metadata");
+        const auto metadata = request.value("root_metadata").toObject();
+        require(metadata.contains("mode"), "Missing source root metadata");
+        validateMetadata(metadata);
         summary_.insert("root_metadata", metadata);
     }
     entries_ = {};

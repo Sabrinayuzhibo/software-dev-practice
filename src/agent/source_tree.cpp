@@ -1,19 +1,16 @@
 #include "backup/agent/source_tree.h"
-#include "backup/agent/channel.h"
+#include "backup/agent/source_sink.h"
+#include "backup/agent/worker_support.h"
 #include "backup/core/detail_page.h"
 #include "backup/core/io.h"
 #include "backup/core/manifest.h"
 #include "backup/core/source_scope.h"
+#include "source_entries.h"
 
-#include <QCryptographicHash>
 #include <QJsonArray>
 #include <QJsonDocument>
-#include <QThread>
 #include <fcntl.h>
 #include <filesystem>
-#include <limits>
-#include <map>
-#include <sys/sysmacros.h>
 #include <unistd.h>
 
 namespace backup::agent
@@ -21,259 +18,6 @@ namespace backup::agent
 using namespace core;
 namespace
 {
-void checkCancelled()
-{
-    require(!QThread::currentThread()->isInterruptionRequested(),
-            "Operation interrupted");
-}
-
-void increment(QJsonObject& status, const char* field, qint64 count = 1)
-{
-    const auto previous = number(status, field);
-    require(count >= 0 &&
-                count <= std::numeric_limits<qint64>::max() - previous,
-            "Source statistics overflow");
-    status.insert(QLatin1String(field), previous + count);
-}
-
-QString entryType(mode_t mode)
-{
-    if (S_ISREG(mode))
-    {
-        return "file";
-    }
-    if (S_ISDIR(mode))
-    {
-        return "directory";
-    }
-    if (S_ISLNK(mode))
-    {
-        return "symlink";
-    }
-    if (S_ISFIFO(mode))
-    {
-        return "fifo";
-    }
-    if (S_ISCHR(mode))
-    {
-        return "character_device";
-    }
-    if (S_ISBLK(mode))
-    {
-        return "block_device";
-    }
-    if (S_ISSOCK(mode))
-    {
-        return "socket";
-    }
-    return "unknown";
-}
-
-bool sameDirectory(const struct stat& before, const struct stat& after)
-{
-    return S_ISDIR(after.st_mode) && before.st_dev == after.st_dev &&
-           before.st_ino == after.st_ino;
-}
-
-void addMetadata(QJsonObject& entry, const struct stat& info)
-{
-    entry.insert("mode", static_cast<qint64>(info.st_mode & 0777));
-    entry.insert("uid", QString::number(info.st_uid));
-    entry.insert("gid", QString::number(info.st_gid));
-    entry.insert("mtime_sec", QString::number(info.st_mtim.tv_sec));
-    entry.insert("mtime_nsec", QString::number(info.st_mtim.tv_nsec));
-}
-
-class SourceEntries
-{
-  public:
-    SourceEntries(int root, Channel* channel, const Progress& progress)
-        : root_(root), channel_(channel), progress_(progress)
-    {
-    }
-    QJsonObject process(const QString& path, const struct stat& info,
-                        QJsonObject& status, bool structural = false);
-    void verify() const;
-
-  private:
-    QJsonObject regular(const QString& path, const struct stat& info,
-                        QJsonObject& status);
-    int root_;
-    Channel* channel_;
-    const Progress& progress_;
-    std::map<std::pair<dev_t, ino_t>, QJsonObject> groups_;
-    QHash<QString, struct stat> snapshots_;
-    QSet<QString> structural_;
-};
-
-QJsonObject SourceEntries::regular(const QString& path, const struct stat& info,
-                                   QJsonObject& status)
-{
-    Descriptor descriptor(openBelow(root_, path, O_RDONLY | O_NONBLOCK));
-    struct stat before
-    {
-    };
-    require(::fstat(descriptor.get(), &before) == 0 &&
-                S_ISREG(before.st_mode) && sameFileState(info, before),
-            "Source changed before read: " + path);
-    const auto key = std::make_pair(info.st_dev, info.st_ino);
-    const auto group = groups_.find(key);
-    QJsonObject entry{{"path", path},
-                      {"type", "file"},
-                      {"size", QString::number(before.st_size)}};
-    addMetadata(entry, before);
-    if (group != groups_.end())
-    {
-        const auto anchorPath = text(group->second, "path");
-        require(sameFileState(snapshots_.value(anchorPath), before) &&
-                    sameFileState(before, statBelow(root_, anchorPath)),
-                "Hard link group changed: " + path);
-        entry.insert("type", "hardlink");
-        entry.insert("link_to", anchorPath);
-        entry.insert("sha256", group->second.value("sha256"));
-        if (channel_)
-        {
-            channel_->call("entry", entry);
-        }
-        increment(status, "bytes", before.st_size);
-        increment(status, "hardlinks");
-        snapshots_.insert(path, before);
-    }
-    else
-    {
-        if (before.st_nlink > 1)
-        {
-            entry.insert("link_group", path);
-        }
-        if (channel_)
-        {
-            channel_->call("entry", entry);
-        }
-        QFile file;
-        require(file.open(descriptor.get(), QIODevice::ReadOnly),
-                "Cannot read: " + path);
-        QCryptographicHash hash(QCryptographicHash::Sha256);
-        qint64 offset = 0;
-        while (true)
-        {
-            checkCancelled();
-            const auto chunk = file.read(kChunkBytes);
-            require(file.error() == QFileDevice::NoError,
-                    "Cannot read: " + path);
-            if (chunk.isEmpty())
-            {
-                break;
-            }
-            require(chunk.size() <= before.st_size - offset,
-                    "Source changed during read: " + path);
-            hash.addData(chunk);
-            if (channel_)
-            {
-                channel_->call(
-                    "chunk", {{"offset", QString::number(offset)},
-                              {"data", QString::fromLatin1(chunk.toBase64())}});
-            }
-            offset += chunk.size();
-            increment(status, "bytes", chunk.size());
-            progress_(status);
-        }
-        require(offset == before.st_size &&
-                    sameFileState(before, statBelow(root_, path)),
-                "Source changed during read: " + path);
-        const auto digest = QString::fromLatin1(hash.result().toHex());
-        entry.insert("sha256", digest);
-        if (channel_)
-        {
-            channel_->call("finish_file", {{"sha256", digest}});
-        }
-        increment(status, "stored_bytes", before.st_size);
-        if (before.st_nlink > 1)
-        {
-            groups_.emplace(key, entry);
-            snapshots_.insert(path, before);
-        }
-    }
-    increment(status, "files");
-    return entry;
-}
-
-QJsonObject SourceEntries::process(const QString& path, const struct stat& info,
-                                   QJsonObject& status, bool structural)
-{
-    const auto type = entryType(info.st_mode);
-    if (type == "file")
-    {
-        return regular(path, info, status);
-    }
-    QJsonObject entry{{"path", path}, {"type", type}};
-    require(type != "socket", "Socket node backups are no longer supported");
-    if (supportedEntryType(type))
-    {
-        addMetadata(entry, info);
-    }
-    if (type == "symlink")
-    {
-        // O_PATH and empty-path readlinkat pin the link itself, even if its
-        // target is a directory, dangling, absolute or not valid UTF-8.
-        Descriptor link(openBelow(root_, path, O_PATH));
-        struct stat pinned
-        {
-        };
-        require(::fstat(link.get(), &pinned) == 0 &&
-                    sameFileState(info, pinned),
-                "Symbolic link changed before read: " + path);
-        QByteArray target(kLinkTargetBytes + 1, '\0');
-        const auto count =
-            ::readlinkat(link.get(), "", target.data(), target.size());
-        require(count > 0 && count < target.size(),
-                "Cannot read symbolic link: " + path);
-        target.resize(count);
-        entry.insert("target_base64", QString::fromLatin1(target.toBase64()));
-        symlinkTarget(entry);
-        require(sameFileState(info, statBelow(root_, path)),
-                "Symbolic link changed: " + path);
-    }
-    if (type == "character_device" || type == "block_device")
-    {
-        entry.insert("device_major", QString::number(major(info.st_rdev)));
-        entry.insert("device_minor", QString::number(minor(info.st_rdev)));
-    }
-    if (!supportedEntryType(type))
-    {
-        entry.insert("reason", "Unsupported " + type + " entry skipped");
-        return entry;
-    }
-    if (channel_)
-    {
-        channel_->call("entry", entry);
-    }
-    const auto counter = type == "directory"          ? "directories"
-                         : type == "symlink"          ? "symlinks"
-                         : type == "fifo"             ? "fifos"
-                         : type == "character_device" ? "character_devices"
-                                                      : "block_devices";
-    increment(status, counter);
-    snapshots_.insert(path, info);
-    if (structural)
-    {
-        structural_.insert(path);
-    }
-    return entry;
-}
-
-void SourceEntries::verify() const
-{
-    for (auto item = snapshots_.begin(); item != snapshots_.end(); ++item)
-    {
-        checkCancelled();
-        const auto after = statBelow(root_, item.key());
-        require(structural_.contains(item.key())
-                    ? sameDirectory(item.value(), after)
-                    : sameFileState(item.value(), after),
-                "Source entry changed during traversal: " + item.key());
-    }
-}
-
 void addSample(QJsonArray& sample, QJsonObject entry)
 {
     if (entry.value("type") == "symlink" && entry.contains("target_base64"))
@@ -307,65 +51,80 @@ void addSample(QJsonArray& sample, QJsonObject entry)
         sample.append(entry);
     }
 }
-} // namespace
-
-QJsonObject sourceTree(const QJsonObject& source, Channel* channel,
-                       const Progress& progress)
+// 一次遍历拥有自己的统计、去重和目录快照；外部依赖只借用到 run 返回。
+class SourceWalker
 {
-    const SourceScope scope(source);
-    require(!scope.fileTypes().contains("socket"),
-            "Socket node backups are no longer supported; create a task "
-            "without the socket type");
-    const auto rootPath = canonicalPath(scope.root());
-    require(rootPath == scope.root(),
-            "Source root has changed: " + scope.root());
-    Descriptor filesystem(::open("/", O_PATH | O_DIRECTORY | O_CLOEXEC));
-    const int flags =
-        (scope.selection().isEmpty() ? O_RDONLY : O_PATH) | O_DIRECTORY;
-    // Resolve every parent without following links, including the logical
-    // root. Selected files do not require listing that root directory.
-    Descriptor root(rootPath == "/"
-                        ? ::open("/", flags | O_CLOEXEC)
-                        : openBelow(filesystem.get(), rootPath.mid(1), flags));
-    struct stat rootBefore
+  public:
+    SourceWalker(int root, const SourceScope& scope, ISourceSink& sink,
+                 const Progress& progress, const struct stat& rootBefore,
+                 const QString& rootPath)
+        : root_(root), scope_(scope), sink_(sink), progress_(progress),
+          rootBefore_(rootBefore), entries_(root, sink, progress),
+          status_({{"stage", sink.stage()},
+                   {"root", rootPath},
+                   {"files", 0},
+                   {"directories", 0},
+                   {"bytes", 0},
+                   {"stored_bytes", 0},
+                   {"symlinks", 0},
+                   {"hardlinks", 0},
+                   {"fifos", 0},
+                   {"character_devices", 0},
+                   {"block_devices", 0},
+                   {"sockets", 0},
+                   {"complete", true},
+                   {"error_count", 0}})
     {
-    };
-    require(::fstat(root.get(), &rootBefore) == 0, "Cannot inspect source");
-    QJsonObject status{{"stage", channel ? "upload" : "scan"},
-                       {"root", rootPath},
-                       {"files", 0},
-                       {"directories", 0},
-                       {"bytes", 0},
-                       {"stored_bytes", 0},
-                       {"symlinks", 0},
-                       {"hardlinks", 0},
-                       {"fifos", 0},
-                       {"character_devices", 0},
-                       {"block_devices", 0},
-                       {"sockets", 0},
-                       {"complete", true},
-                       {"error_count", 0}};
-    SourceEntries entries(root.get(), channel, progress);
-    QJsonArray sample;
-    QJsonArray warnings;
-    const auto problem = [&](const QString& path, const QString& reason)
+    }
+
+    QJsonObject run()
     {
-        if (channel)
+        if (scope_.selection().isEmpty())
         {
-            throw Error(path + ": " + reason);
+            visit({});
         }
-        warnings.append(QJsonObject{{"path", path.isEmpty() ? "." : path},
-                                    {"reason", reason},
-                                    {"severity", "error"}});
-        status.insert("complete", false);
-        increment(status, "error_count");
-    };
-    QSet<QString> processed;
-    QSet<QString> excludedDirectories;
-    QHash<QString, struct stat> deferredDirectories;
-    QSet<QString> structuralDirectories;
-    std::function<void(const QString&)> visit;
-    const auto includeParents = [&](const QString& path)
+        else
+        {
+            for (const auto& value : scope_.selection())
+            {
+                const auto item = value.toObject();
+                const auto path = text(item, "path");
+                // 仅创建结构父目录，不扫描旁边未选择的条目。
+                QString parent;
+                const auto components = path.split('/');
+                for (qsizetype index = 0; index + 1 < components.size();
+                     ++index)
+                {
+                    parent = parent.isEmpty()
+                                 ? components[index]
+                                 : parent + '/' + components[index];
+                    process(parent, "directory", true);
+                }
+                process(path, text(item, "type"), false);
+            }
+        }
+        verify();
+        status_.insert("sample", sample_);
+        status_.insert("warnings", warnings_);
+        status_.insert(
+            "entries",
+            number(status_, "files") + number(status_, "directories") +
+                number(status_, "symlinks") + number(status_, "fifos") +
+                number(status_, "character_devices") +
+                number(status_, "block_devices") + number(status_, "sockets"));
+        status_.insert("hashed_files",
+                       number(status_, "files") - number(status_, "hardlinks"));
+        status_.insert("unreadable_files", status_.value("error_count"));
+        return status_;
+    }
+
+  private:
+    void problem(const QString& path, const QString& reason)
+    {
+        sink_.problem(path, reason, status_, warnings_);
+    }
+
+    void includeParents(const QString& path)
     {
         QString parent;
         const auto components = path.split('/');
@@ -373,73 +132,74 @@ QJsonObject sourceTree(const QJsonObject& source, Channel* channel,
         {
             parent = parent.isEmpty() ? components[index]
                                       : parent + '/' + components[index];
-            if (deferredDirectories.contains(parent))
+            if (deferredDirectories_.contains(parent))
             {
-                const auto info = deferredDirectories.take(parent);
-                addSample(sample, entries.process(
-                                      parent, info, status,
-                                      structuralDirectories.contains(parent)));
+                const auto info = deferredDirectories_.take(parent);
+                addSample(
+                    sample_,
+                    entries_.process(parent, info, status_,
+                                     structuralDirectories_.contains(parent)));
             }
         }
-    };
-    const auto process =
-        [&](const QString& path, const QString& expected, bool structural)
+    }
+
+    void process(const QString& path, const QString& expected, bool structural)
     {
-        checkCancelled();
-        if (processed.contains(path))
+        checkOperationCancelled();
+        if (processed_.contains(path))
         {
             return;
         }
         auto parentSlash = path.lastIndexOf('/');
         while (parentSlash >= 0)
         {
-            if (excludedDirectories.contains(path.left(parentSlash)))
+            if (excludedDirectories_.contains(path.left(parentSlash)))
             {
                 return;
             }
             parentSlash = path.lastIndexOf('/', parentSlash - 1);
         }
-        const auto previous = number(status, "bytes");
+        const auto previous = number(status_, "bytes");
         QString type = expected;
         try
         {
-            const auto info = statBelow(root.get(), path);
-            type = entryType(info.st_mode);
+            const auto info = statBelow(root_, path);
+            type = sourceEntryType(info.st_mode);
             require(expected.isEmpty() || type == expected,
                     "Selected source type changed: " + path);
-            status.insert("path", path);
+            status_.insert("path", path);
             if (type == "directory" &&
-                scope.excludesDirectorySubtree(path, info.st_uid,
-                                               info.st_mtim.tv_sec))
+                scope_.excludesDirectorySubtree(path, info.st_uid,
+                                                info.st_mtim.tv_sec))
             {
-                excludedDirectories.insert(path);
-                processed.insert(path);
-                progress(status);
+                excludedDirectories_.insert(path);
+                processed_.insert(path);
+                progress_(status_);
                 return;
             }
             if (type == "directory" &&
-                (structural || (!scope.includes("directory") ||
-                                !scope.matches(path, type, 0, info.st_uid,
-                                               info.st_mtim.tv_sec))))
+                (structural || (!scope_.includes("directory") ||
+                                !scope_.matches(path, type, 0, info.st_uid,
+                                                info.st_mtim.tv_sec))))
             {
-                deferredDirectories.insert(path, info);
+                deferredDirectories_.insert(path, info);
                 if (structural)
                 {
-                    structuralDirectories.insert(path);
+                    structuralDirectories_.insert(path);
                 }
-                processed.insert(path);
+                processed_.insert(path);
                 if (!structural)
                 {
                     visit(path);
                 }
-                progress(status);
+                progress_(status_);
                 return;
             }
             if ((type == "character_device" || type == "block_device" ||
                  type == "socket") &&
-                !scope.includes(type) &&
-                (type == "socket" || scope.fileTypes().isEmpty() ||
-                 scope.hasEmptyDirectoryRule()))
+                !scope_.includes(type) &&
+                (type == "socket" || scope_.fileTypes().isEmpty() ||
+                 scope_.hasEmptyDirectoryRule()))
             {
                 const auto reason =
                     type == "socket"
@@ -449,28 +209,28 @@ QJsonObject sourceTree(const QJsonObject& source, Channel* channel,
                                  "up";
                 QJsonObject skipped{
                     {"path", path}, {"type", type}, {"reason", reason}};
-                addSample(sample, skipped);
-                warnings.append(skipped);
-                processed.insert(path);
-                progress(status);
+                addSample(sample_, skipped);
+                warnings_.append(skipped);
+                processed_.insert(path);
+                progress_(status_);
                 return;
             }
-            if (type != "directory" && !scope.includes(type) &&
-                (supportedEntryType(type) || !scope.hasEmptyDirectoryRule()))
+            if (type != "directory" && !scope_.includes(type) &&
+                (supportedEntryType(type) || !scope_.hasEmptyDirectoryRule()))
             {
-                processed.insert(path);
+                processed_.insert(path);
                 return;
             }
             if (type != "directory")
             {
                 const auto filterType =
                     type == "file" && info.st_nlink > 1 ? "hardlink" : type;
-                if (!scope.matches(path, filterType,
-                                   type == "file" ? info.st_size : 0,
-                                   info.st_uid, info.st_mtim.tv_sec))
+                if (!scope_.matches(path, filterType,
+                                    type == "file" ? info.st_size : 0,
+                                    info.st_uid, info.st_mtim.tv_sec))
                 {
-                    processed.insert(path);
-                    progress(status);
+                    processed_.insert(path);
+                    progress_(status_);
                     return;
                 }
             }
@@ -478,43 +238,43 @@ QJsonObject sourceTree(const QJsonObject& source, Channel* channel,
             {
                 includeParents(path);
             }
-            const auto entry = entries.process(path, info, status, structural);
-            processed.insert(path);
-            addSample(sample, entry);
+            const auto entry =
+                entries_.process(path, info, status_, structural);
+            processed_.insert(path);
+            addSample(sample_, entry);
             if (entry.contains("reason"))
             {
-                warnings.append(entry);
+                warnings_.append(entry);
             }
             if (S_ISDIR(info.st_mode) && !structural)
             {
                 visit(path);
             }
-            progress(status);
+            progress_(status_);
         }
         catch (const std::exception& failure)
         {
-            checkCancelled();
-            if (!channel)
-            {
-                status.insert("bytes", previous);
-                if (!type.isEmpty() && !processed.contains(path))
-                {
-                    addSample(sample, {{"path", path}, {"type", type}});
-                }
-            }
+            checkOperationCancelled();
+            // 上传接收者在此抛出；扫描接收者记录失败后继续处理其他条目。
             problem(path, QString::fromUtf8(failure.what()));
+            status_.insert("bytes", previous);
+            if (!type.isEmpty() && !processed_.contains(path))
+            {
+                addSample(sample_, {{"path", path}, {"type", type}});
+            }
         }
-    };
-    visit = [&](const QString& relative)
+    }
+
+    void visit(const QString& relative)
     {
-        checkCancelled();
+        checkOperationCancelled();
         try
         {
             Descriptor directory(
                 relative.isEmpty()
-                    ? ::dup(root.get())
-                    : openBelow(root.get(), relative, O_RDONLY | O_DIRECTORY));
-            // Enumerate the pinned directory, never a path swapped to a link.
+                    ? ::dup(root_)
+                    : openBelow(root_, relative, O_RDONLY | O_DIRECTORY));
+            // 通过固定的目录 fd 枚举，防止路径被替换为软链接。
             const auto pinned =
                 "/proc/self/fd/" + std::to_string(directory.get());
             std::error_code error;
@@ -522,7 +282,7 @@ QJsonObject sourceTree(const QJsonObject& source, Channel* channel,
             require(!error, QString::fromStdString(error.message()));
             while (iterator != std::filesystem::directory_iterator())
             {
-                checkCancelled();
+                checkOperationCancelled();
                 const auto native = iterator->path().filename().native();
                 const auto name =
                     QString::fromUtf8(native.data(), native.size());
@@ -537,7 +297,7 @@ QJsonObject sourceTree(const QJsonObject& source, Channel* channel,
                 }
                 catch (const std::exception& failure)
                 {
-                    checkCancelled();
+                    checkOperationCancelled();
                     problem(path, QString::fromUtf8(failure.what()));
                 }
                 iterator.increment(error);
@@ -546,70 +306,82 @@ QJsonObject sourceTree(const QJsonObject& source, Channel* channel,
         }
         catch (const std::exception& failure)
         {
-            checkCancelled();
+            checkOperationCancelled();
             problem(relative, QString::fromUtf8(failure.what()));
         }
-    };
-    if (scope.selection().isEmpty())
-    {
-        visit({});
     }
-    else
+
+    void verify()
     {
-        for (const auto& value : scope.selection())
+        try
         {
-            const auto item = value.toObject();
-            const auto path = text(item, "path");
-            // Structural parents are created without scanning their siblings.
-            QString parent;
-            const auto components = path.split('/');
-            for (qsizetype index = 0; index + 1 < components.size(); ++index)
+            entries_.verify();
+            for (auto item = deferredDirectories_.begin();
+                 item != deferredDirectories_.end(); ++item)
             {
-                parent = parent.isEmpty() ? components[index]
-                                          : parent + '/' + components[index];
-                process(parent, "directory", true);
+                checkOperationCancelled();
+                const auto after = statBelow(root_, item.key());
+                require(structuralDirectories_.contains(item.key())
+                            ? sameSourceDirectoryState(item.value(), after)
+                            : sameFileState(item.value(), after),
+                        "Source directory changed during traversal: " +
+                            item.key());
             }
-            process(path, text(item, "type"), false);
+            struct stat after
+            {
+            };
+            require(::fstat(root_, &after) == 0 &&
+                        (scope_.selection().isEmpty()
+                             ? sameFileState(rootBefore_, after)
+                             : sameSourceDirectoryState(rootBefore_, after)),
+                    "Source directory changed during traversal");
+        }
+        catch (const std::exception& failure)
+        {
+            checkOperationCancelled();
+            problem(".", QString::fromUtf8(failure.what()));
         }
     }
-    try
+
+    int root_;
+    const SourceScope& scope_;
+    ISourceSink& sink_;
+    const Progress& progress_;
+    const struct stat rootBefore_;
+    SourceEntries entries_;
+    QJsonObject status_;
+    QJsonArray sample_;
+    QJsonArray warnings_;
+    QSet<QString> processed_;
+    QSet<QString> excludedDirectories_;
+    QHash<QString, struct stat> deferredDirectories_;
+    QSet<QString> structuralDirectories_;
+};
+} // namespace
+
+QJsonObject sourceTree(const QJsonObject& source, ISourceSink& sink,
+                       const Progress& progress)
+{
+    const SourceScope scope(source);
+    require(!scope.fileTypes().contains("socket"),
+            "Socket node backups are no longer supported; create a task "
+            "without the socket type");
+    const auto rootPath = canonicalPath(scope.root());
+    require(rootPath == scope.root(),
+            "Source root has changed: " + scope.root());
+    Descriptor filesystem(::open("/", O_PATH | O_DIRECTORY | O_CLOEXEC));
+    const int flags =
+        (scope.selection().isEmpty() ? O_RDONLY : O_PATH) | O_DIRECTORY;
+    // 逐级固定父目录且不跟随软链接；选定文件时无需列举逻辑根目录。
+    Descriptor root(rootPath == "/"
+                        ? ::open("/", flags | O_CLOEXEC)
+                        : openBelow(filesystem.get(), rootPath.mid(1), flags));
+    struct stat rootBefore
     {
-        entries.verify();
-        for (auto item = deferredDirectories.begin();
-             item != deferredDirectories.end(); ++item)
-        {
-            checkCancelled();
-            const auto after = statBelow(root.get(), item.key());
-            require(structuralDirectories.contains(item.key())
-                        ? sameDirectory(item.value(), after)
-                        : sameFileState(item.value(), after),
-                    "Source directory changed during traversal: " + item.key());
-        }
-        struct stat after
-        {
-        };
-        require(::fstat(root.get(), &after) == 0 &&
-                    (scope.selection().isEmpty()
-                         ? sameFileState(rootBefore, after)
-                         : sameDirectory(rootBefore, after)),
-                "Source directory changed during traversal");
-    }
-    catch (const std::exception& failure)
-    {
-        checkCancelled();
-        problem(".", QString::fromUtf8(failure.what()));
-    }
-    status.insert("sample", sample);
-    status.insert("warnings", warnings);
-    status.insert("entries",
-                  number(status, "files") + number(status, "directories") +
-                      number(status, "symlinks") + number(status, "fifos") +
-                      number(status, "character_devices") +
-                      number(status, "block_devices") +
-                      number(status, "sockets"));
-    status.insert("hashed_files",
-                  number(status, "files") - number(status, "hardlinks"));
-    status.insert("unreadable_files", status.value("error_count"));
-    return status;
+    };
+    require(::fstat(root.get(), &rootBefore) == 0, "Cannot inspect source");
+    SourceWalker walker(root.get(), scope, sink, progress, rootBefore,
+                        rootPath);
+    return walker.run();
 }
 } // namespace backup::agent

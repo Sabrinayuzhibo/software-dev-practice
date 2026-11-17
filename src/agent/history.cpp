@@ -54,6 +54,10 @@ QList<QByteArray> warningLines(const QJsonArray& warnings)
         {
             normalized.insert("type", text(item, "type"));
         }
+        if (item.value("type") == "metadata" && item.contains("field"))
+        {
+            normalized.insert("field", text(item, "field"));
+        }
         auto line = QJsonDocument(normalized).toJson(QJsonDocument::Compact);
         require(line.size() + 1 < kHistoryPageBytes / 2,
                 "Warning entry exceeds supported size");

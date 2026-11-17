@@ -27,6 +27,7 @@ import { checkVersionDeletion } from './desktop_version_deletion.mjs'
 import { checkCompression } from './desktop_compression.mjs'
 import { checkCustomFilters } from './desktop_custom_filter.mjs'
 import { checkScanTree } from './desktop_scan_tree.mjs'
+import { checkMetadata } from './desktop_metadata.mjs'
 
 const root = fileURLToPath(new URL('../', import.meta.url))
 const execute = promisify(execFile)
@@ -1390,6 +1391,9 @@ try {
     await checkCompression({ page, main, click, until, temporary })
     await checkCustomFilters({ page, main, click, until, temporary })
     await checkScanTree({ page, main, click, until, temporary })
+    await checkMetadata({ page, main, click, until, temporary })
+    // 专项结束时会重载页面，先等待渲染恢复，再检查窗口后台计时。
+    await requireGlass(page, until)
     await page.evaluate(`
     globalThis.windowTestClicks = [];
     document.addEventListener('click', event => {

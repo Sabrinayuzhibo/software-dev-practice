@@ -4,6 +4,8 @@ contextBridge.exposeInMainWorld('backup', {
     getConfig: () => ipcRenderer.invoke('config:get'),
     configureEncryption: (command: string, id: string, password?: string) =>
         ipcRenderer.invoke('targets:encryption', command, id, password),
+    loginRemote: (id: string, account: string, password: string) =>
+        ipcRenderer.invoke('targets:login', id, account, password),
     saveTarget: (target: unknown) => ipcRenderer.invoke('targets:save', target),
     pingServer: (targetId = 'local') =>
         ipcRenderer.invoke('server:ping', targetId),

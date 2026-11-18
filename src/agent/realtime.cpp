@@ -1,4 +1,5 @@
 #include "backup/agent/realtime.h"
+#include "backup/agent/remote_session.h"
 #include "backup/core/io.h"
 #include "backup/core/source_scope.h"
 
@@ -246,6 +247,7 @@ struct Realtime::Impl
         bool locked = false;
         QString waiting;
         QString error;
+        QString failureKind;
         QString monitorError;
         QString operation;
         qint64 first = 0;
@@ -255,6 +257,18 @@ struct Realtime::Impl
     };
     std::map<QString, Task> tasks;
     QHash<QString, QJsonObject> uncertain;
+    QHash<QString, QDeadlineTimer> remoteSessions;
+
+    bool needsAuthentication(const Task& task) const
+    {
+        const auto target = task.config.value("target").toObject();
+        if (!remoteTarget(target))
+        {
+            return false;
+        }
+        const auto session = remoteSessions.constFind(endpointKey(target));
+        return session == remoteSessions.cend() || session->hasExpired();
+    }
     QTimer timer;
     QElapsedTimer clock;
     std::function<bool()> busy;
@@ -281,6 +295,7 @@ Realtime::Realtime(std::function<bool()> busy, Start start)
                 {
                     const auto& task = it->second;
                     if (task.dirty && !task.running && !task.locked &&
+                        !impl_->needsAuthentication(task) &&
                         task.waiting.isEmpty() &&
                         task.due <= impl_->clock.elapsed() &&
                         (chosen == impl_->tasks.end() ||
@@ -428,6 +443,7 @@ void Realtime::completed(const QJsonObject& operation)
     task.locked =
         operation.value("error").toString().startsWith("REPOSITORY_LOCKED:");
     task.operation = operation.value("id").toString();
+    task.failureKind = operation.value("failure_kind").toString();
     if (operation.value("state").toString().startsWith("SUCCEEDED"))
     {
         task.error.clear();
@@ -473,18 +489,49 @@ void Realtime::setRepositoryLocked(const QJsonObject& config,
     }
 }
 
+void Realtime::setAuthenticated(const QJsonObject& target, qint64 seconds)
+{
+    if (!remoteTarget(target))
+    {
+        return;
+    }
+    const auto key = endpointKey(target);
+    if (seconds <= 0)
+    {
+        impl_->remoteSessions.remove(key);
+        return;
+    }
+    for (auto& [id, task] : impl_->tasks)
+    {
+        const auto configured = task.config.value("target").toObject();
+        if (remoteTarget(configured) && endpointKey(configured) == key)
+        {
+            task.dirty |= impl_->needsAuthentication(task);
+            task.failures = 0;
+            task.failureKind.clear();
+            task.error.clear();
+            task.due = impl_->clock.elapsed();
+        }
+    }
+    impl_->remoteSessions.insert(key, QDeadlineTimer(seconds * 1000));
+}
+
 QJsonObject Realtime::status() const
 {
     QJsonObject result;
     for (const auto& [id, task] : impl_->tasks)
     {
-        const auto state = task.running              ? "BACKING_UP"
-                           : !task.waiting.isEmpty() ? "WAITING_CONFIRMATION"
-                           : task.locked             ? "WAITING_UNLOCK"
-                           : task.failures > 0       ? "RETRYING"
-                           : task.dirty              ? "PENDING"
-                           : !task.monitorError.isEmpty() ? "DEGRADED"
-                                                          : "WATCHING";
+        const auto state =
+            task.running                               ? "BACKING_UP"
+            : impl_->needsAuthentication(task)         ? "WAITING_AUTH"
+            : !task.waiting.isEmpty()                  ? "WAITING_CONFIRMATION"
+            : task.locked                              ? "WAITING_UNLOCK"
+            : task.failureKind == "WAITING_CONNECTION" ? "WAITING_CONNECTION"
+            : task.failureKind == "CERTIFICATE_FAILED" ? "CERTIFICATE_FAILED"
+            : task.failures > 0                        ? "RETRYING"
+            : task.dirty                               ? "PENDING"
+            : !task.monitorError.isEmpty()             ? "DEGRADED"
+                                                       : "WATCHING";
         result.insert(id, QJsonObject{{"state", state},
                                       {"error", task.error},
                                       {"monitor_error", task.monitorError},

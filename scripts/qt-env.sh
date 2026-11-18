@@ -9,6 +9,7 @@ if [[ -f "$qt_lib/pkgconfig/Qt6Core.pc" ]]; then
     export PKG_CONFIG_PATH="$qt_lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
     export PKG_CONFIG_SYSROOT_DIR="$qt_prefix"
     export LD_LIBRARY_PATH="$qt_lib:$qt_lib/libproxy${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+    export QT_PLUGIN_PATH="$qt_lib/qt6/plugins${QT_PLUGIN_PATH:+:$QT_PLUGIN_PATH}"
     export QT_QPA_PLATFORM_PLUGIN_PATH="$qt_lib/qt6/plugins/platforms"
 fi
 

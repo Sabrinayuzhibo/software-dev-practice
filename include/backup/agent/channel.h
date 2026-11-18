@@ -4,7 +4,7 @@
 #include "backup/core/io.h"
 #include "backup/protocol/frame.h"
 #include <QElapsedTimer>
-#include <QTcpSocket>
+#include <QSslSocket>
 
 namespace backup::agent
 {
@@ -30,7 +30,10 @@ class Channel
     void keepAlive();
 
   private:
-    QTcpSocket socket_;
+    void connectRemote(const QString& host, quint16 port);
+    void validateRepository() const;
+    QSslSocket socket_;
+    QJsonObject target_;
     QElapsedTimer lastResponse_;
     protocol::FrameDecoder decoder_;
     QJsonObject health_;

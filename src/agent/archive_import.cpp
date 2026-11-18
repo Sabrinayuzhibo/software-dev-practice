@@ -1,5 +1,6 @@
 #include "archive_io.h"
 #include "backup/agent/channel.h"
+#include "backup/agent/remote_session.h"
 #include "backup/agent/source_sink.h"
 #include "backup/agent/worker_support.h"
 #include "backup/core/archive.h"
@@ -63,8 +64,14 @@ QJsonObject commitImport(Channel& channel, const QJsonObject& target,
     {
         return channel.call("commit", {{"operation_id", operationId}});
     }
-    catch (const std::exception&)
+    catch (const std::exception& failure)
     {
+        const auto* connection = dynamic_cast<const ChannelError*>(&failure);
+        if (connection &&
+            connection->kind() == ConnectionFailure::Authentication)
+        {
+            throw;
+        }
         progress({{"stage", "confirm"}});
         try
         {

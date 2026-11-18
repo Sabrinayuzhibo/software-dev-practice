@@ -1,4 +1,5 @@
 #include "backup/agent/state.h"
+#include "backup/agent/remote_session.h"
 #include "backup/agent/source_selection.h"
 #include "backup/core/compression.h"
 #include "backup/core/io.h"
@@ -33,6 +34,10 @@ bool sameRepository(const QJsonObject& first, const QJsonObject& second)
     {
         return true;
     }
+    if (remoteTarget(first) || remoteTarget(second))
+    {
+        return false;
+    }
     const auto root = [](const QJsonObject& target)
     {
         return target.value("repository_path")
@@ -55,7 +60,7 @@ State::State(const QString& directory) : directory_(canonicalPath(directory))
     {
         config_ = readObject(path);
         require((config_.value("format").toInt() >= 1 &&
-                 config_.value("format").toInt() <= 9) &&
+                 config_.value("format").toInt() <= 10) &&
                     config_.value("tasks").isArray() &&
                     config_.value("targets").isArray(),
                 "Invalid Agent configuration; original file preserved");
@@ -65,10 +70,10 @@ State::State(const QString& directory) : directory_(canonicalPath(directory))
             const auto item = value.toObject();
             const QString id = text(item, "id");
             require(validId(id) && !targetIds.contains(id) &&
-                        text(item, "host") == "127.0.0.1" &&
-                        number(item, "port") > 0 &&
-                        number(item, "port") <= 65535,
+                        (!remoteTarget(item) ||
+                         config_.value("format").toInt() >= 10),
                     "Invalid saved target");
+            validateEndpoint(item);
             require(
                 !item.contains("repository_encryption_id") ||
                     (config_.value("format").toInt() >= 9 &&
@@ -189,7 +194,8 @@ void State::rememberTargetRoot(const QString& id, const QString& root,
         auto item = targets[index].toObject();
         if (item.value("id") == id)
         {
-            item.insert("data_root", canonicalPath(root));
+            item.insert("data_root", remoteTarget(item) ? QDir::cleanPath(root)
+                                                        : canonicalPath(root));
             if (!encryptionId.isEmpty())
             {
                 require(validId(encryptionId),
@@ -205,7 +211,8 @@ void State::rememberTargetRoot(const QString& id, const QString& root,
             next.insert("targets", targets);
             if (!encryptionId.isEmpty())
             {
-                next.insert("format", 9);
+                next.insert("format",
+                            std::max(9, next.value("format").toInt()));
             }
             save(next);
             return;
@@ -440,24 +447,26 @@ QJsonObject State::configure(const QString& action, const QJsonObject& args)
     auto next = config_;
     if (action == "save_target")
     {
-        require(!args.contains("mode") || args.value("mode") == "local",
-                "Only local targets are supported");
+        validateEndpoint(args);
         require(!args.contains("repository_path") ||
                     args.value("repository_path").isString(),
                 "Invalid repository path");
         const QString id = args.value("id").toString(newId());
         require(validId(id), "Invalid target identifier");
-        require(text(args, "host") == "127.0.0.1" && number(args, "port") > 0 &&
-                    number(args, "port") <= 65535,
-                "Only local targets are supported");
         const auto name = text(args, "name");
         const auto compression = compressionAlgorithm(args);
         auto targets = config_.value("targets").toArray();
         QJsonObject value{{"id", id},
                           {"name", name},
-                          {"mode", "local"},
-                          {"host", "127.0.0.1"},
+                          {"mode", args.value("mode").toString("local")},
+                          {"host", args.value("host")},
                           {"port", args.value("port")}};
+        if (remoteTarget(value))
+        {
+            value.insert("ca_certificate",
+                         args.value("ca_certificate").toString());
+            next.insert("format", 10);
+        }
         value.insert("compression", compression);
         if (compression != "none")
         {
@@ -469,7 +478,8 @@ QJsonObject State::configure(const QString& action, const QJsonObject& args)
         {
             require(QDir(repository).isAbsolute(),
                     "Repository path must be absolute");
-            const auto root = canonicalPath(repository);
+            const auto root = remoteTarget(value) ? QDir::cleanPath(repository)
+                                                  : canonicalPath(repository);
             for (const auto& task : config_.value("tasks").toArray())
             {
                 require(!SourceScope(task.toObject()).overlaps(root),
@@ -504,7 +514,10 @@ QJsonObject State::configure(const QString& action, const QJsonObject& args)
             if (targets[index].toObject().value("id") == id)
             {
                 const auto previous = targets[index].toObject();
-                if (previous.value("host") == value.value("host") &&
+                if (remoteTarget(previous) == remoteTarget(value) &&
+                    previous.value("ca_certificate").toString() ==
+                        value.value("ca_certificate").toString() &&
+                    previous.value("host") == value.value("host") &&
                     number(previous, "port") == number(value, "port") &&
                     previous.contains("data_root") &&
                     (repository.isEmpty() || value.value("repository_path") ==

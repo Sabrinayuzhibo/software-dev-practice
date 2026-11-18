@@ -28,7 +28,7 @@ agent_moc = qt6.compile_moc(
   include_directories: inc,
   dependencies: [qt_core, qt_network])
 agent_core = static_library('backup-agent-core',
-  ['src/agent/agent_client.cpp', 'src/agent/channel.cpp', 'src/agent/vault.cpp',
+  ['src/agent/agent_client.cpp', 'src/agent/channel.cpp', 'src/agent/remote_session.cpp', 'src/agent/vault.cpp',
    'src/agent/sealed_upload.cpp', 'src/agent/sealed_download.cpp',
    'src/agent/control_service.cpp', 'src/agent/realtime.cpp',
    'src/agent/state.cpp', 'src/agent/history.cpp', 'src/agent/restore_journal.cpp',
@@ -52,7 +52,7 @@ server_moc = qt6.compile_moc(
   include_directories: inc,
   dependencies: [qt_core, qt_network])
 server_core = static_library('backup-server-core',
-  ['src/server/backup_server.cpp', 'src/server/repository.cpp', 'src/server/sealed_repository.cpp',
+  ['src/server/backup_server.cpp', 'src/server/remote_auth.cpp', 'src/server/repository.cpp', 'src/server/sealed_repository.cpp',
    'src/server/version_deletion.cpp', server_moc],
   include_directories: inc,
   dependencies: [protocol_dep, qt_network])
@@ -190,3 +190,7 @@ test('realtime-faults', python3,
 test('backup-encryption', python3,
   args: [files('tests/backup_encryption.py')[0], agent.full_path(), server.full_path()],
   timeout: 180)
+
+test('backup-remote', python3,
+  args: [files('tests/backup_remote.py')[0], agent.full_path(), server.full_path()],
+  timeout: 120)

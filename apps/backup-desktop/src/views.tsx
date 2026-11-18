@@ -34,7 +34,7 @@ export function TargetsView({ model }: { model: ConsoleModel }) {
     const { config, targetDraft, setTargetDraft, mutating, saveTarget } = model
     const [password, setPassword] = useState<{
         id: string
-        mode: 'create' | 'unlock'
+        mode: 'create' | 'unlock' | 'login'
     }>()
     const lock = async (id: string) => {
         try {
@@ -51,15 +51,21 @@ export function TargetsView({ model }: { model: ConsoleModel }) {
                     key={password.id}
                     mode={password.mode}
                     title={
-                        password.mode === 'create' ? '启用仓库加密' : '解锁仓库'
+                        {
+                            create: '启用仓库加密',
+                            unlock: '解锁仓库',
+                            login: '登录远端备份目标',
+                        }[password.mode]
                     }
                     onClose={() => setPassword(undefined)}
-                    onSubmit={(value) =>
-                        model.configureEncryption(
-                            password.mode,
-                            password.id,
-                            value,
-                        )
+                    onSubmit={(value, _allowPlain, account) =>
+                        password.mode === 'login'
+                            ? model.loginRemote(password.id, account, value)
+                            : model.configureEncryption(
+                                  password.mode,
+                                  password.id,
+                                  value,
+                              )
                     }
                 />
             )}
@@ -89,7 +95,7 @@ export function TargetsView({ model }: { model: ConsoleModel }) {
                                 <td className="path">
                                     {item.repository_path ||
                                         item.data_root ||
-                                        '由本机服务管理'}
+                                        '由服务端管理'}
                                 </td>
                                 <td>
                                     {
@@ -106,6 +112,20 @@ export function TargetsView({ model }: { model: ConsoleModel }) {
                                         <Settings size={16} />
                                         编辑
                                     </GlassButton>
+                                    {item.mode === 'remote' && (
+                                        <GlassButton
+                                            className="login-remote"
+                                            disabled={model.busy}
+                                            onClick={() =>
+                                                setPassword({
+                                                    id: item.id,
+                                                    mode: 'login',
+                                                })
+                                            }
+                                        >
+                                            登录
+                                        </GlassButton>
+                                    )}
                                     {item.repository_encryption_id ? (
                                         <>
                                             <GlassButton
@@ -170,15 +190,57 @@ export function TargetsView({ model }: { model: ConsoleModel }) {
                     />
                 </label>
                 <label>
-                    主机
-                    <GlassInput value="127.0.0.1" readOnly />
-                </label>
-                <label>
                     模式
-                    <GlassSelect value="local" disabled>
+                    <GlassSelect
+                        aria-label="目标模式"
+                        value={targetDraft.mode || 'local'}
+                        onChange={(event) => {
+                            const mode =
+                                event.target.value === 'remote'
+                                    ? 'remote'
+                                    : 'local'
+                            setTargetDraft({
+                                ...targetDraft,
+                                mode,
+                                host: mode === 'local' ? '127.0.0.1' : '',
+                            })
+                        }}
+                    >
                         <option value="local">本地仓库</option>
+                        <option value="remote">远端仓库（TLS）</option>
                     </GlassSelect>
                 </label>
+                <label>
+                    主机
+                    <GlassInput
+                        aria-label="目标主机"
+                        required
+                        value={targetDraft.host}
+                        readOnly={targetDraft.mode !== 'remote'}
+                        onChange={(event) =>
+                            setTargetDraft({
+                                ...targetDraft,
+                                host: event.target.value,
+                            })
+                        }
+                    />
+                </label>
+                {targetDraft.mode === 'remote' && (
+                    <label className="repository-path">
+                        CA 证书路径（可选）
+                        <GlassInput
+                            aria-label="CA 证书路径"
+                            value={targetDraft.ca_certificate || ''}
+                            placeholder="留空使用系统信任的证书"
+                            onChange={(event) =>
+                                setTargetDraft({
+                                    ...targetDraft,
+                                    ca_certificate: event.target.value,
+                                })
+                            }
+                        />
+                    </label>
+                )}
                 <label className="repository-path">
                     仓库路径（可选）
                     <GlassInput

@@ -99,7 +99,7 @@ with tempfile.TemporaryDirectory(prefix="backup-realtime-") as temp:
         (source / "offline.txt").write_text("server offline")
         eventually(
             lambda: fixture.request("config")["realtime_status"][task["id"]]["state"]
-            == "RETRYING"
+            == "WAITING_CONNECTION"
         )
         assert len(successes()) == 3
         fixture.start_server()

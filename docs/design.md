@@ -30,6 +30,7 @@
 | 未压缩格式 4 / 压缩格式 5，兼容读取 1—4 | `database/access.json` 存本地令牌；`storage/staging/<operation-id>/` 暂存；`storage/versions/<operation-id>/` 保存已提交版本；每版包含 summary.json、entries.jsonl、warnings.jsonl，只有普通文件内容条目生成按编号命名的 .data 文件。摘要保存 warning_count / warnings_sha256，查询仍兼容旧内嵌 warnings；历史版本不改写，两端程序需同时更新 |
 | 独立归档（2026-11-17） | 自有 BSAR1 大端序记录流、完整版本摘要/清单/警告及实际编码内容；最终摘要与逐文件验证后无覆盖导出。导入先验证私有快照，再用 begin_import 上传为新版本，按目标压缩策略编码；原仓库不可用时仍可还原。支持已存类型、元数据和历史 socket，普通备份继续拒绝新 socket。详见[归档实现说明](archive.md)；加密外层见下行。随机索引和断点续传仍属目标设计 |
 | 仓库加密（FR-15） | OpenSSL EVP AES-256-GCM、scrypt 封装仓库密钥、内存解锁，Agent 压缩后密封文件和清单区段。Server 仅保存密文。BSAE v1 外层认证 BSAR1 分块记录，独立导入。详情见[当前实现](encryption.md) |
+| 远端 TLS 会话 | Qt TLS 1.2+ 校验主机与证书，限时单账户内存会话。任务按待连接、待认证、待解锁区分恢复条件。部署、现有会话策略见[实现说明](remote-backup.md) |
 | 大量警告 | 备份分批上传警告后提交；版本列表省略明细，version_warnings 按需返回，每页最多 100 项、64 KiB 并校验整份 JSONL。Agent 执行记录的重复明细按 SHA-256 共享；版本文件内容仍独立保存 |
 | 扫描 | 文件、目录及跳过条目带类型预览，样本同时受数量和字节上限约束。单项读取失败继续检查其他条目，保存 error_count / complete 和具体路径；扫描不完整时记录 FAILED 并保留预览。备份保持失败即停止的语义 |
 | 提交 | 每个文件验证长度/SHA-256 并 fsync，清单计算整体摘要；摘要与清单写入后同步目录，暂存目录原子改名为版本目录并同步父目录；该改名是唯一可见点；重复 commit 查询同一版本 |
@@ -53,7 +54,7 @@ Server 发布前与 Agent 还原前共用清单校验器，拒绝非目录父路
 
 Agent 对明确的服务拒绝记录 FAILED；传输结果不确定或重启时尚未结束的删除记录为 WAITING。用户从执行记录重新确认后，按原目标、仓库和版本重试；编辑目标配置不会改变重试范围。删除中断后不会自动在启动时继续销毁数据。确认弹窗为普通面板，操作按钮保留液态玻璃，默认键盘焦点在“取消”。
 
-当前尚未采用下文的 SQLite、跨版本对象去重、二进制 DATA 帧、远端 TLS。源文件可读性/类型、读取前后 stat 信息和目录变化会检查，但不提供文件系统原子快照。新程序读取格式 1—5；未来对象仓库迁移仍需单独设计，不能将现有格式直接当作该设计的数据。
+当前尚未采用下文的 SQLite、跨版本对象去重或二进制 DATA 帧。源文件可读性/类型、读取前后 stat 信息和目录变化会检查，但不提供文件系统原子快照。新程序读取格式 1—5；未来对象仓库迁移仍需单独设计，不能将现有格式直接当作该设计的数据。
 
 基础代码分工：`src/core/io.cpp` 提供受检 I/O，`manifest.cpp` 校验清单，`source_scope.cpp` 定义保存的选择范围；`src/agent/source_selection.cpp` 校验及规范化用户选择，`state.cpp` 管配置和记录；`channel.cpp` 管工作线程的有界 RPC；`source_tree.cpp` 统一扫描与上传遍历，`operations.cpp` 编排扫描/备份，`restore.cpp` 校验并还原；`src/server/repository.cpp` 管暂存和版本；Main/Preload 只开放固定入口。C++ 的 `.clang-format` 与项目 skill 约束新代码。
 
@@ -204,7 +205,7 @@ payload                          # 控制 JSON 或二进制块
 
 失败默认重启未完成操作，不承诺块级续传。Commit 已发但 ACK 丢失进入“结果待确认”，先查询同 operation_id，不直接重复建版本。自动任务断线按 5 秒起、最大 5 分钟指数退避并加抖动，恢复后全量对账；手动失败不无限重试。
 
-远端 TLS 1.2+（优先 1.3）由 QSslSocket/OpenSSL 校验证书链、有效期与主机名。自签部署显式导入 CA 或固定指纹，证书轮换要更新信任，不提供普通忽略错误开关。单账户由维护者初始化，保存 Argon2id 带盐验证值；失败登录限流。访问令牌有效 30 分钟，刷新令牌仅在 Agent 内存并自动续期，直到注销、Agent 退出或维护者撤销；Server 仅保存令牌哈希。关闭 GUI 不影响续期。刷新失效则任务待认证，重启需重新认证；仓库解锁仍独立进行。
+远端 TLS 1.2+（优先 1.3）由 QSslSocket/OpenSSL 校验证书链、有效期与主机名。自签部署显式导入 CA 或固定指纹，证书轮换要更新信任，不提供普通忽略错误开关。目标设计中的单账户由维护者初始化，保存 Argon2id 带盐验证值；失败登录限流。访问令牌有效 30 分钟，刷新令牌仅在 Agent 内存并自动续期，直到注销、Agent 退出或维护者撤销；Server 仅保存令牌哈希。关闭 GUI 不影响续期。刷新失效则任务待认证，重启需重新认证；仓库解锁仍独立进行。
 
 稳定错误码：INVALID_ARGUMENT、UNSUPPORTED_VERSION、UNAUTHORIZED、TLS_UNTRUSTED、REPOSITORY_LOCKED、SOURCE_CHANGED、SOURCE_UNREADABLE、STORAGE_FULL、DATA_CORRUPT、PATH_ESCAPE、CONFLICT、NETWORK_INTERRUPTED、INTERNAL。上下文包括目标、执行、版本、阶段和可显示相对路径，不回显敏感参数。
 

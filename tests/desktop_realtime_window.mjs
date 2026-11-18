@@ -1,14 +1,7 @@
 import assert from 'node:assert/strict'
-import { spawn } from 'node:child_process'
+import { spawn, execFileSync } from 'node:child_process'
 import { createServer } from 'node:net'
-import {
-    mkdir,
-    mkdtemp,
-    readFile,
-    writeFile,
-    rename,
-    rm,
-} from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, writeFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
@@ -115,10 +108,14 @@ function launch(script, args, env) {
         })
     return child
 }
-async function server(name) {
-    const child = launch('scripts/run-server.sh', ['--port', '0'], {
-        BACKUP_DATA_DIR: join(temporary, name),
-    })
+async function server(name, requested = 0, args = []) {
+    const child = launch(
+        'scripts/run-server.sh',
+        ['--port', String(requested), ...args],
+        {
+            BACKUP_DATA_DIR: join(temporary, name),
+        },
+    )
     let text = ''
     child.stdout.on('data', (data) => {
         text += data
@@ -299,6 +296,28 @@ try {
         await readFile(join(temporary, 'restored/example.txt'), 'utf8'),
         'after GUI closed',
     )
+    const cardState = (task, label) =>
+        page.evaluate(
+            `document.querySelector('[data-task-id="${task}"] .realtime-toggle')?.textContent.includes(${JSON.stringify(label)})`,
+        )
+    backend.child.kill('SIGTERM')
+    await until(
+        () =>
+            backend.child.exitCode !== null ||
+            backend.child.signalCode !== null,
+        'local server stops',
+    )
+    await writeFile(join(source, 'example.txt'), 'local server was offline')
+    await until(
+        () => cardState('realtime-window', '待连接'),
+        'local waiting for connection',
+    )
+    await server('repository', backend.port)
+    await until(
+        () => cardState('realtime-window', '监控中'),
+        'local reconnect resumes',
+        30000,
+    )
     await click('input[aria-label="实时备份"]')
     await until(
         () =>
@@ -306,6 +325,150 @@ try {
                 `document.querySelector('.realtime-toggle')?.textContent.includes('已关闭')`,
             ),
         'disable',
+    )
+    const key = join(temporary, 'remote-key.pem')
+    const cert = join(temporary, 'remote-cert.pem')
+    const accountFile = join(temporary, 'remote-account.json')
+    execFileSync(
+        'openssl',
+        [
+            'req',
+            '-x509',
+            '-newkey',
+            'rsa:2048',
+            '-nodes',
+            '-days',
+            '1',
+            '-keyout',
+            key,
+            '-out',
+            cert,
+            '-subj',
+            '/CN=127.0.0.1',
+            '-addext',
+            'subjectAltName=IP:127.0.0.1',
+        ],
+        { stdio: 'ignore' },
+    )
+    const password = 'realtime-window-remote-test'
+    execFileSync(
+        join(root, 'scripts/run-server.sh'),
+        ['--init-remote-account', 'desktop', '--account-file', accountFile],
+        { input: password + '\n' },
+    )
+    const remote = await server('remote-repository', 0, [
+        '--tls-cert',
+        cert,
+        '--tls-key',
+        key,
+        '--account-file',
+        accountFile,
+        '--session-seconds',
+        '12',
+    ])
+    const remoteSource = join(temporary, 'remote-source')
+    await mkdir(remoteSource)
+    await writeFile(join(remoteSource, 'proof.txt'), 'first remote backup')
+    await page.evaluate(
+        `window.backup.saveTarget(${JSON.stringify({
+            id: 'remote-ui',
+            name: '远端窗口验证',
+            mode: 'remote',
+            host: '127.0.0.1',
+            port: remote.port,
+            ca_certificate: cert,
+        })})`,
+    )
+    const remoteTask = await page.evaluate(`window.backup.createTask(
+        [${JSON.stringify(remoteSource)}], 'remote-ui', '远端任务', ['file'], true)`)
+    await page.call('Page.reload')
+    await requireGlass(page, until)
+    await page.evaluate(`(() => {
+        const select = document.querySelector('.target-selector select');
+        select.value = 'remote-ui';
+        select.dispatchEvent(new Event('change', { bubbles: true }));
+    })()`)
+    await until(
+        () =>
+            page.evaluate(
+                "document.querySelector('.status-dot')?.classList.contains('auth-required')",
+            ),
+        'remote target selected and connection checked',
+    )
+    await page.evaluate(
+        `document.querySelector('[data-task-id="${remoteTask.id}"] input[aria-label="实时备份"]').focus()`,
+    )
+    await page.call('Input.dispatchKeyEvent', {
+        type: 'keyDown',
+        key: ' ',
+        code: 'Space',
+        windowsVirtualKeyCode: 32,
+    })
+    await page.call('Input.dispatchKeyEvent', {
+        type: 'keyUp',
+        key: ' ',
+        code: 'Space',
+        windowsVirtualKeyCode: 32,
+    })
+    await until(
+        () => cardState(remoteTask.id, '待认证'),
+        'remote authentication pending',
+    )
+    async function login() {
+        await click('[data-tab="targets"]')
+        await click('[data-target-id="remote-ui"] .login-remote')
+        for (const [selector, text] of [
+            ['input[autocomplete="username"]', 'desktop'],
+            ['input[type="password"]', password],
+        ]) {
+            await page.evaluate(
+                `document.querySelector('dialog[open] ${selector}').focus()`,
+            )
+            await page.call('Input.insertText', { text })
+        }
+        await click('dialog[open] button[type="submit"]')
+        await until(
+            () => page.evaluate("!document.querySelector('dialog[open]')"),
+            'remote credentials accepted',
+        )
+        await click('[data-tab="tasks"]')
+    }
+    await login()
+    await until(
+        () => cardState(remoteTask.id, '监控中'),
+        'remote automatic backup',
+    )
+    await until(
+        () => cardState(remoteTask.id, '待认证'),
+        'remote session expiry',
+    )
+    await writeFile(join(remoteSource, 'proof.txt'), 'backup after relogin')
+    await login()
+    await until(
+        () => cardState(remoteTask.id, '监控中'),
+        'remote backup after relogin',
+    )
+    const remoteRecords = (
+        await page.evaluate('window.backup.listOperations()')
+    ).operations
+    const remoteVersion = remoteRecords.find(
+        (row) =>
+            row.task_id === remoteTask.id &&
+            row.action === 'backup' &&
+            row.state === 'SUCCEEDED',
+    )
+    assert(remoteVersion)
+    const remoteRestored = join(temporary, 'remote-restored')
+    const remoteRestore = await page.evaluate(
+        `window.backup.restoreVersion('remote-ui', '${remoteVersion.id}', ${JSON.stringify(remoteRestored)})`,
+    )
+    await operation(remoteRestore.operation_id)
+    assert.equal(
+        await readFile(join(remoteRestored, 'proof.txt'), 'utf8'),
+        'backup after relogin',
+    )
+    console.log(
+        'PASS: desktop local connection status, remote sign-in, expiration, relogin and restore',
     )
     await main.evaluate('testWindow.close()')
     main.close()

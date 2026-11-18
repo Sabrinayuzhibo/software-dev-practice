@@ -3,30 +3,36 @@
 #include "backup/protocol/frame.h"
 
 #include <QHostAddress>
+#include <QSslConfiguration>
+#include <QSslKey>
+#include <QSslSocket>
 #include <QTcpSocket>
 #include <QTimer>
 #include <memory>
 
 namespace backup::server
 {
-namespace
-{
-struct Session
+struct BackupServer::Session
 {
     protocol::FrameDecoder decoder;
     bool authenticated = false;
+    QByteArray remoteSession;
     bool uploading = false;
     QSet<QString> reading;
 };
-} // namespace
 
-BackupServer::BackupServer(QObject* parent) : QObject(parent)
+BackupServer::BackupServer(QObject* parent)
+    : QObject(parent), listener_(std::make_unique<QTcpServer>())
+{
+}
+
+void BackupServer::acceptFrom(QTcpServer& listener)
 {
     connect(
-        &listener_, &QTcpServer::newConnection, this,
+        &listener, &QTcpServer::pendingConnectionAvailable, this,
         [this]
         {
-            while (auto* socket = listener_.nextPendingConnection())
+            while (auto* socket = listener_->nextPendingConnection())
             {
                 auto session = std::make_shared<Session>();
                 socket->setReadBufferSize(protocol::kMaxFrameBytes + 4);
@@ -52,36 +58,12 @@ BackupServer::BackupServer(QObject* parent) : QObject(parent)
                                     "result", message.requestId, {}};
                                 try
                                 {
-                                    const auto& args = message.payload;
-                                    const auto& action = message.type;
-                                    if (action == "ping")
+                                    response.payload =
+                                        dispatch(*session, message.type,
+                                                 message.payload);
+                                    if (message.type == "ping")
                                     {
                                         response.type = "pong";
-                                        response.payload = {
-                                            {"server", "Backup Server"},
-                                            {"data_root", repository_.root()},
-                                            {"protocol", 1},
-                                            {"archive_format", 1},
-                                            {"sealed_protocol", 1},
-                                            {"encryption",
-                                             repository_.encryption()}};
-                                    }
-                                    else if (action == "authenticate")
-                                    {
-                                        core::require(
-                                            core::text(args, "token") ==
-                                                repository_.token(),
-                                            "Local authentication failed");
-                                        session->authenticated = true;
-                                    }
-                                    else
-                                    {
-                                        core::require(
-                                            session->authenticated,
-                                            "Authentication required");
-                                        response.payload = handleRequest(
-                                            action, args, &session->uploading,
-                                            &session->reading);
                                     }
                                 }
                                 catch (const std::exception& failure)
@@ -110,18 +92,78 @@ BackupServer::BackupServer(QObject* parent) : QObject(parent)
                 connect(socket, &QTcpSocket::disconnected, socket,
                         [this, session, socket]
                         {
-                            if (session->uploading)
-                            {
-                                repository_.abort();
-                            }
-                            for (const auto& id : session->reading)
-                            {
-                                repository_.releaseVersion(id);
-                            }
+                            release(*session);
                             socket->deleteLater();
                         });
             }
         });
+}
+
+void BackupServer::release(Session& session)
+{
+    if (session.uploading)
+    {
+        repository_.abort();
+        session.uploading = false;
+    }
+    for (const auto& id : session.reading)
+    {
+        repository_.releaseVersion(id);
+    }
+    session.reading.clear();
+    session.remoteSession.clear();
+}
+
+QJsonObject BackupServer::dispatch(Session& session, const QString& action,
+                                   const QJsonObject& args)
+{
+    using core::require;
+    if (remote_ && !session.remoteSession.isEmpty() &&
+        !remote_->valid(session.remoteSession))
+    {
+        release(session);
+    }
+    const bool authorized =
+        remote_ ? remote_->valid(session.remoteSession) : session.authenticated;
+    if (action == "ping")
+    {
+        QJsonObject result{{"server", "Backup Server"},
+                           {"protocol", 1},
+                           {"remote_auth", bool(remote_)},
+                           {"archive_format", 1},
+                           {"sealed_protocol", 1}};
+        if (!remote_ || authorized)
+        {
+            result.insert("data_root", repository_.root());
+            result.insert("encryption", repository_.encryption());
+        }
+        return result;
+    }
+    if (remote_ && action == "remote_login")
+    {
+        require(!session.uploading, "Login during upload is not allowed");
+        return remote_->login(args);
+    }
+    if (remote_ && action == "remote_resume")
+    {
+        require(!session.uploading,
+                "Authentication during upload is not allowed");
+        const auto token =
+            RemoteAuth::digest(core::text(args, "session_token"));
+        require(remote_->valid(token),
+                "AUTH_REQUIRED: Remote session expired or invalid");
+        session.remoteSession = token;
+        return {};
+    }
+    if (!remote_ && action == "authenticate")
+    {
+        require(core::text(args, "token") == repository_.token(),
+                "Local authentication failed");
+        session.authenticated = true;
+        return {};
+    }
+    require(authorized, "AUTH_REQUIRED: Authentication required");
+    return handleRequest(action, args, &session.uploading, &session.reading);
 }
 
 QJsonObject BackupServer::handleRequest(const QString& action,
@@ -255,11 +297,48 @@ bool BackupServer::prepareDataRoot(const QString& path, QString* error)
     }
 }
 
-bool BackupServer::listen(quint16 port, QString* error)
+void BackupServer::enableRemote(const QString& cert, const QString& key,
+                                const QString& account, int lifetimeSeconds)
 {
-    if (!listener_.listen(QHostAddress::LocalHost, port))
+    using core::require;
+    require(QSslSocket::supportsSsl(), "TLS backend is unavailable");
+    const auto chain = QSslCertificate::fromPath(
+        cert, QSsl::Pem, QSslCertificate::PatternSyntax::FixedString);
+    QFile file(key);
+    require(file.open(QIODevice::ReadOnly) && file.size() <= 64 * 1024,
+            "Cannot read TLS private key");
+    const auto pem = file.readAll();
+    QSslKey privateKey(pem, QSsl::Rsa);
+    if (privateKey.isNull())
     {
-        *error = listener_.errorString();
+        privateKey = QSslKey(pem, QSsl::Ec);
+    }
+    require(!chain.isEmpty() && !privateKey.isNull(),
+            "Invalid TLS certificate or private key");
+    auto config = QSslConfiguration::defaultConfiguration();
+    config.setLocalCertificateChain(chain);
+    config.setPrivateKey(privateKey);
+    config.setProtocol(QSsl::TlsV1_2OrLater);
+    config.setPeerVerifyMode(QSslSocket::VerifyNone);
+    auto listener = std::make_unique<QSslServer>();
+    listener->setSslConfiguration(config);
+    listener->setHandshakeTimeout(10000);
+    remote_ = std::make_unique<RemoteAuth>(account, lifetimeSeconds);
+    listener_ = std::move(listener);
+}
+
+bool BackupServer::listen(const QHostAddress& address, quint16 port,
+                          QString* error)
+{
+    if (address != QHostAddress::LocalHost && !remote_)
+    {
+        *error = "Network listening requires TLS and a remote account";
+        return false;
+    }
+    acceptFrom(*listener_);
+    if (!listener_->listen(address, port))
+    {
+        *error = listener_->errorString();
         return false;
     }
     return true;
@@ -267,6 +346,6 @@ bool BackupServer::listen(quint16 port, QString* error)
 
 quint16 BackupServer::serverPort() const
 {
-    return listener_.serverPort();
+    return listener_->serverPort();
 }
-} // namespace backup::server
+} // 命名空间 backup::server

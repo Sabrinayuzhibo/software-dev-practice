@@ -64,7 +64,8 @@ export interface Target {
     name: string
     host: string
     port: number
-    mode?: 'local'
+    mode?: 'local' | 'remote'
+    ca_certificate?: string
     repository_path?: string
     data_root?: string
     compression?: Compression
@@ -79,6 +80,9 @@ export interface RealtimeStatus {
         | 'RETRYING'
         | 'WAITING_CONFIRMATION'
         | 'WAITING_UNLOCK'
+        | 'WAITING_CONNECTION'
+        | 'WAITING_AUTH'
+        | 'CERTIFICATE_FAILED'
         | 'DEGRADED'
     error: string
     monitor_error: string
@@ -240,9 +244,16 @@ export interface DesktopApi {
         id: string,
         password?: string,
     ): Promise<void>
+    loginRemote(
+        id: string,
+        account: string,
+        password: string,
+    ): Promise<{ expires_in: number }>
     saveTarget(target: Partial<Target>): Promise<Configuration>
     pingServer(targetId?: string): Promise<{
         connected: boolean
+        authRequired?: boolean
+        certificateFailed?: boolean
         storageAvailable?: boolean
         locked?: boolean
         server?: string

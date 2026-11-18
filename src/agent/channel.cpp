@@ -1,4 +1,5 @@
 #include "backup/agent/channel.h"
+#include "backup/agent/remote_session.h"
 #include "backup/core/detail_page.h"
 #include "backup/core/io.h"
 #include "sealed_session.h"
@@ -6,6 +7,7 @@
 #include <QElapsedTimer>
 #include <QFileInfo>
 #include <QJsonDocument>
+#include <QSslConfiguration>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -17,28 +19,95 @@ namespace
 constexpr int kTimeoutMs = 10000;
 }
 
-Channel::Channel(const QJsonObject& target)
+Channel::Channel(const QJsonObject& target) : target_(target)
 {
     const QString host = target.value("host").toString("127.0.0.1");
     const auto port = target.contains("port") ? number(target, "port") : 9000;
-    require(host == "127.0.0.1" && port > 0 && port <= 65535,
-            "Invalid local target");
+    auto endpoint = target;
+    endpoint.insert("host", host);
+    endpoint.insert("port", port);
+    validateEndpoint(endpoint);
     socket_.setReadBufferSize(protocol::kMaxFrameBytes + 4);
+    if (remoteTarget(target_))
+    {
+        connectRemote(host, static_cast<quint16>(port));
+        health_ = rawCall("ping");
+        require(health_.value("remote_auth") == true,
+                "Server does not support remote authentication");
+        return;
+    }
     socket_.connectToHost(host, static_cast<quint16>(port));
-    const bool connected = socket_.waitForConnected(kTimeoutMs);
-    require(connected,
-            "Cannot connect to local Server: " + socket_.errorString());
+    if (!socket_.waitForConnected(kTimeoutMs))
+    {
+        throw ChannelError(ConnectionFailure::Network,
+                           "Cannot connect to local Server: " +
+                               socket_.errorString());
+    }
     health_ = rawCall("ping");
+    validateRepository();
+}
+
+void Channel::connectRemote(const QString& host, quint16 port)
+{
+    auto config = QSslConfiguration::defaultConfiguration();
+    config.setProtocol(QSsl::TlsV1_2OrLater);
+    config.setPeerVerifyMode(QSslSocket::VerifyPeer);
+    const auto ca = target_.value("ca_certificate").toString();
+    if (!ca.isEmpty())
+    {
+        const auto certs = QSslCertificate::fromPath(
+            ca, QSsl::Pem, QSslCertificate::PatternSyntax::FixedString);
+        if (certs.isEmpty())
+        {
+            throw ChannelError(
+                ConnectionFailure::Certificate,
+                "CERTIFICATE_FAILED: Cannot read the selected CA file");
+        }
+        config.setCaCertificates(certs);
+    }
+    if (!QSslSocket::supportsSsl())
+    {
+        throw ChannelError(ConnectionFailure::Certificate,
+                           "CERTIFICATE_FAILED: TLS backend is unavailable");
+    }
+    socket_.setSslConfiguration(config);
+    socket_.connectToHost(host, port);
+    if (!socket_.waitForConnected(kTimeoutMs))
+    {
+        throw ChannelError(ConnectionFailure::Network,
+                           "Cannot connect to remote Server: " +
+                               socket_.errorString());
+    }
+    socket_.setPeerVerifyName(host);
+    socket_.startClientEncryption();
+    if (!socket_.waitForEncrypted(kTimeoutMs))
+    {
+        if (!socket_.sslHandshakeErrors().isEmpty() ||
+            socket_.error() == QAbstractSocket::SslHandshakeFailedError)
+        {
+            throw ChannelError(ConnectionFailure::Certificate,
+                               "CERTIFICATE_FAILED: " + socket_.errorString());
+        }
+        throw ChannelError(ConnectionFailure::Network,
+                           "Remote TLS connection interrupted: " +
+                               socket_.errorString());
+    }
+}
+
+void Channel::validateRepository() const
+{
     const auto expectedVault =
-        target.value("repository_encryption_id").toString();
+        target_.value("repository_encryption_id").toString();
     require(expectedVault.isEmpty() ||
                 health_.value("encryption").toObject().value("repository_id") ==
                     expectedVault,
             "Repository encryption identity changed");
-    const auto expectedRoot = target.value("repository_path").toString();
+    const auto expectedRoot = target_.value("repository_path").toString();
+    const auto root = text(health_, "data_root");
     require(expectedRoot.isEmpty() ||
-                canonicalPath(expectedRoot) ==
-                    canonicalPath(text(health_, "data_root")),
+                (remoteTarget(target_)
+                     ? expectedRoot == root
+                     : canonicalPath(expectedRoot) == canonicalPath(root)),
             "Repository path does not match the connected Server");
 }
 
@@ -51,6 +120,13 @@ QJsonObject Channel::health() const
 
 void Channel::authenticate()
 {
+    if (remoteTarget(target_))
+    {
+        RemoteSessions::resume(*this, target_);
+        health_ = rawCall("ping");
+        validateRepository();
+        return;
+    }
     const QString path = text(health_, "data_root") + "/database/access.json";
     struct stat info
     {
@@ -67,22 +143,29 @@ QJsonObject Channel::rawCall(const QString& action, const QJsonObject& payload)
     const QString id = newId();
     const auto frame = protocol::encode({action, id, payload});
     require(!frame.isEmpty(), "Request exceeds protocol limit");
-    require(socket_.write(frame) == frame.size(), socket_.errorString());
+    if (socket_.write(frame) != frame.size())
+    {
+        throw ChannelError(ConnectionFailure::Network, socket_.errorString());
+    }
     QElapsedTimer deadline;
     deadline.start();
     while (socket_.bytesToWrite() > 0)
     {
-        require(deadline.elapsed() < kTimeoutMs &&
-                    socket_.waitForBytesWritten(kTimeoutMs),
-                "Server write interrupted or timed out");
+        if (deadline.elapsed() >= kTimeoutMs ||
+            !socket_.waitForBytesWritten(kTimeoutMs))
+        {
+            throw ChannelError(ConnectionFailure::Network,
+                               "Server write interrupted or timed out");
+        }
     }
     while (deadline.elapsed() < kTimeoutMs)
     {
-        if (socket_.bytesAvailable() == 0)
+        if (socket_.bytesAvailable() == 0 &&
+            !socket_.waitForReadyRead(kTimeoutMs -
+                                      static_cast<int>(deadline.elapsed())))
         {
-            require(socket_.waitForReadyRead(
-                        kTimeoutMs - static_cast<int>(deadline.elapsed())),
-                    "Server disconnected or timed out");
+            throw ChannelError(ConnectionFailure::Network,
+                               "Server disconnected or timed out");
         }
         QList<protocol::Message> messages;
         QString error;
@@ -96,15 +179,20 @@ QJsonObject Channel::rawCall(const QString& action, const QJsonObject& payload)
         const auto& message = messages.first();
         if (message.type == "error")
         {
-            throw ServerError(message.payload.value("reason").toString(
-                "Server rejected request"));
+            const auto reason = message.payload.value("reason").toString(
+                "Server rejected request");
+            if (reason.startsWith("AUTH_REQUIRED:"))
+            {
+                throw ChannelError(ConnectionFailure::Authentication, reason);
+            }
+            throw ServerError(reason);
         }
         require(message.type == (action == "ping" ? "pong" : "result"),
                 "Invalid response type");
         lastResponse_.start();
         return message.payload;
     }
-    throw Error("Server response timed out");
+    throw ChannelError(ConnectionFailure::Network, "Server response timed out");
 }
 void Channel::keepAlive()
 {

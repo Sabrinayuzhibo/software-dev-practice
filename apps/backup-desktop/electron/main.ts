@@ -78,6 +78,29 @@ function registerHandlers(): void {
             return bridge.send(action, payload, 20000)
         },
     )
+    ipcMain.handle(
+        'targets:login',
+        (_event, id: unknown, account: unknown, password: unknown) => {
+            if (
+                typeof id !== 'string' ||
+                !id ||
+                id.length > 80 ||
+                typeof account !== 'string' ||
+                !account ||
+                account.length > 80 ||
+                typeof password !== 'string' ||
+                !password ||
+                Buffer.byteLength(password) > 1024
+            ) {
+                throw new Error('账号或密码格式无效')
+            }
+            return bridge.send(
+                'login_remote',
+                { target_id: id, account, password },
+                30000,
+            )
+        },
+    )
     ipcMain.handle('server:ping', async (_event, targetId = 'local') => {
         try {
             const result = await bridge.send<{
@@ -86,7 +109,7 @@ function registerHandlers(): void {
                 storage_state: string
                 storage_error?: string
                 repository_locked?: boolean
-            }>('ping', { target_id: targetId }, 15000)
+            }>('ping', { target_id: targetId }, 25000)
             return {
                 connected: true,
                 storageAvailable: result.storage_state === 'available',
@@ -96,7 +119,13 @@ function registerHandlers(): void {
                 locked: result.repository_locked,
             }
         } catch (error) {
-            return { connected: false, error: String(error) }
+            const message = String(error)
+            return {
+                connected: false,
+                authRequired: message.includes('AUTH_REQUIRED:'),
+                certificateFailed: message.includes('CERTIFICATE_FAILED:'),
+                error: message,
+            }
         }
     })
     ipcMain.handle('tasks:list', async () => {

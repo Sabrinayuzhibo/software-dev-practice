@@ -772,3 +772,19 @@ Windows 测试使用 Win32 `ShowWindowAsync` 和鼠标事件，经 WSLg 到 Elec
 首次完整回归中 29/30 通过。新增专项在慢速磁盘还原大量空文件时复现连接空闲超时。修复在 Agent 长时间执行本地还原或元数据处理时维持连接，并把归档导入的写入连接延后至整包验证结束。最终代码在主构建目录重编译，`python3 tests/backup_encryption.py build/backup-agent build/backup-server` 和桌面专项均通过。没有将初次回归计为 30/30 通过。
 
 最终代码在独立构建目录以 `meson test -C <验证目录> backup-encryption backup-realtime realtime-faults backup-archive archive-streaming --print-errorlogs` 复验 5/5 通过。加密专项 72.10 秒，原有 1 GiB 归档流式套件 152.18 秒。最终构建无新增编译告警，修改文件通过 clang-format、Prettier、Black 和 `git diff --check`。
+
+## 2026-11-18 实时备份待连接、待认证与远端 TLS
+
+范围为本地断线重试的状态区分、TLS 单账户远端备份以及实时任务重新认证恢复。相关部署方法见[远端备份说明](remote-backup.md)。
+
+| 验证场景 | 实际观察 |
+| --- | --- |
+| 本地 Server 断线与恢复 | 关闭测试 Server 后修改文件。真实窗口任务卡显示「待连接」，同仓库同端口重启后自动补扫并恢复监控。 |
+| 远端 TLS 与登录 | 本机不同地址启动真实 TLS Server，错误主机名、不受信 CA、错误口令及匿名列版本均被拒绝。正确账号可上传并还原文件。未认证探测不返回仓库目录。 |
+| 会话过期与重新登录 | 缩短测试会话期限。任务卡在自然过期后显示「待认证」，等待期间源文件改动未生成成功版本，重新登录后补扫并还原最新内容。Server 或 Agent 重启后旧会话被拒绝。 |
+| 桌面与桥接回归 | `npm run test:realtime --prefix apps/backup-desktop`、`npm run test:archive --prefix apps/backup-desktop`、`npm run test:bridge --prefix apps/backup-desktop` 均通过。 |
+| 本地兼容 | 本地模式保持回环监听与令牌认证。用户级 Qt 的 TLS 插件已通过运行环境脚本加入插件搜索路径。 |
+
+TLS 测试使用同一台机器的 `127.0.0.2` 或独立端口模拟远端，尚未在两台物理主机上完成部署验收。桌面首轮在切换目标后过早点击了复选框，最终用例等待连接状态稳定并通过键盘切换。
+
+最终运行 `./scripts/build.sh`，31/31 个 Meson 套件及 TypeScript/Vite 构建通过，0 失败、0 跳过、0 超时。远端专项 23.50 秒，并验证持续 TLS 连接上的过期请求仍被 Server 拒绝，以及 Agent 的 JSON 状态文件未保存口令或令牌。格式检查与 `git diff --check` 通过。

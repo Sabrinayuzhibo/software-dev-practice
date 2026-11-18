@@ -18,6 +18,8 @@ class Realtime final : public QObject
     // 执行结果须先持久化；不确定提交会暂停该任务，直到原操作确认完成。
     void setRepositoryLocked(const QJsonObject& config,
                              const QString& repository, bool locked);
+    // 同一远端端点共用有效期。为零时暂停，登录后恢复待处理变化。
+    void setAuthenticated(const QJsonObject& target, qint64 seconds);
     void completed(const QJsonObject& operation);
     QJsonObject status() const;
 

@@ -146,6 +146,19 @@ export function useBackupConsole() {
             if (request !== connectionRequest.current) {
                 return
             }
+            if (result.authRequired || result.certificateFailed) {
+                setConnection({
+                    state: result.authRequired
+                        ? 'auth-required'
+                        : 'certificate-failed',
+                    detail: result.authRequired
+                        ? '待认证，请在备份目标登录'
+                        : '远端证书校验失败',
+                    root: '',
+                    error: result.error || '',
+                })
+                return
+            }
             setConnection({
                 state: !result.connected
                     ? 'offline'
@@ -267,6 +280,25 @@ export function useBackupConsole() {
                 const current = await window.backup.getConfig()
                 if (cancelled) return
                 setConfig(current)
+                if (
+                    current.tasks.some(
+                        (task) =>
+                            task.target_id === targetRef.current &&
+                            current.realtime_status?.[task.id]?.state ===
+                                'WAITING_AUTH',
+                    )
+                ) {
+                    setConnection((previous) =>
+                        ['online', 'locked'].includes(previous.state)
+                            ? {
+                                  ...previous,
+                                  state: 'auth-required',
+                                  detail: '待认证，请在备份目标登录',
+                                  error: '',
+                              }
+                            : previous,
+                    )
+                }
                 if (current.tasks.some((task) => task.realtime)) {
                     await loadRecords()
                 }
@@ -597,6 +629,19 @@ export function useBackupConsole() {
         }
     }
 
+    async function loginRemote(id: string, account: string, password: string) {
+        setMutating(true)
+        try {
+            await window.backup.loginRemote(id, account, password)
+            setConfig(await window.backup.getConfig())
+            if (id === targetId) {
+                await refreshConnection()
+            }
+        } finally {
+            setMutating(false)
+        }
+    }
+
     async function configureEncryption(
         command: 'create' | 'unlock' | 'lock',
         id: string,
@@ -901,6 +946,7 @@ export function useBackupConsole() {
         removeTask,
         saveTarget,
         configureEncryption,
+        loginRemote,
         showRecord,
         viewVersions,
         removeCandidate,

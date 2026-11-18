@@ -1,5 +1,6 @@
 #include "backup/agent/operations.h"
 #include "backup/agent/channel.h"
+#include "backup/agent/remote_session.h"
 #include "backup/agent/source_sink.h"
 #include "backup/agent/source_tree.h"
 #include "backup/agent/worker_support.h"
@@ -110,8 +111,14 @@ QJsonObject backup(const QJsonObject& task, const QJsonObject& target,
     {
         version = channel.call("commit", {{"operation_id", operationId}});
     }
-    catch (const std::exception&)
+    catch (const std::exception& failure)
     {
+        const auto* connection = dynamic_cast<const ChannelError*>(&failure);
+        if (connection &&
+            connection->kind() == ConnectionFailure::Authentication)
+        {
+            throw;
+        }
         // A lost commit acknowledgement is resolved by the same operation ID.
         progress({{"stage", "confirm"}});
         try

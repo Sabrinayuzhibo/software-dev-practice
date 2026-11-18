@@ -59,7 +59,7 @@ export default function App() {
     ]
     return (
         <div className="desktop">
-            <TitleBar />
+            <TitleBar remote={model.target?.mode === 'remote'} />
             <div className="app-shell">
                 <aside className="sidebar">
                     <Suspense fallback={null}>
@@ -80,7 +80,9 @@ export default function App() {
                     ))}
                     <div className="sidebar-footer">
                         <ShieldCheck size={17} />
-                        本地仓库
+                        {model.target?.mode === 'remote'
+                            ? '远端仓库'
+                            : '本地仓库'}
                     </div>
                 </aside>
                 <main className="content" ref={contentRef}>

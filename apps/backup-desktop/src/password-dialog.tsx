@@ -10,11 +10,16 @@ export function PasswordDialog({
     onSubmit,
 }: {
     title: string
-    mode: 'create' | 'unlock' | 'import'
+    mode: 'create' | 'unlock' | 'import' | 'login'
     onClose: () => void
-    onSubmit: (password: string, allowPlain: boolean) => Promise<void>
+    onSubmit: (
+        password: string,
+        allowPlain: boolean,
+        account: string,
+    ) => Promise<void>
 }) {
     const [password, setPassword] = useState('')
+    const [account, setAccount] = useState('')
     const [confirm, setConfirm] = useState('')
     const [allowPlain, setAllowPlain] = useState(false)
     const [pending, setPending] = useState(false)
@@ -39,17 +44,21 @@ export function PasswordDialog({
                     setPending(true)
                     setError('')
                     try {
-                        await onSubmit(password, allowPlain)
+                        await onSubmit(password, allowPlain, account)
                         onClose()
                     } catch (failure) {
                         const message = String(failure)
                         setError(
-                            message.includes('Authentication failed')
-                                ? '密码错误，或加密数据已损坏'
-                                : message.includes('new, empty repository') ||
-                                    message.includes('no previous backups')
-                                  ? '请使用没有备份历史的新仓库启用加密'
-                                  : message,
+                            message.includes(
+                                'Invalid remote account or password',
+                            )
+                                ? '远端账号或密码错误'
+                                : message.includes('Authentication failed')
+                                  ? '密码错误，或加密数据已损坏'
+                                  : message.includes('new, empty repository') ||
+                                      message.includes('no previous backups')
+                                    ? '请使用没有备份历史的新仓库启用加密'
+                                    : message,
                         )
                     } finally {
                         setPending(false)
@@ -61,10 +70,31 @@ export function PasswordDialog({
                         仅空仓库可启用。请妥善保存密码，遗失后无法恢复备份。
                     </p>
                 )}
+                {mode === 'login' && (
+                    <label>
+                        远端账号
+                        <GlassInput
+                            autoFocus
+                            required
+                            autoComplete="username"
+                            maxLength={80}
+                            disabled={pending}
+                            value={account}
+                            onChange={(event) => setAccount(event.target.value)}
+                        />
+                    </label>
+                )}
                 <label>
-                    {mode === 'import' ? '归档密码' : '仓库密码'}
+                    {
+                        {
+                            create: '仓库密码',
+                            unlock: '仓库密码',
+                            import: '归档密码',
+                            login: '账号密码',
+                        }[mode]
+                    }
                     <GlassInput
-                        autoFocus
+                        autoFocus={mode !== 'login'}
                         required
                         type="password"
                         autoComplete={
@@ -126,6 +156,7 @@ export function PasswordDialog({
                                 create: '启用加密',
                                 unlock: '解锁仓库',
                                 import: '选择归档',
+                                login: '登录',
                             }[mode]
                         }
                     </GlassButton>

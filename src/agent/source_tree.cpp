@@ -1,4 +1,5 @@
 #include "backup/agent/source_tree.h"
+#include "backup/agent/remote_session.h"
 #include "backup/agent/source_sink.h"
 #include "backup/agent/worker_support.h"
 #include "backup/core/detail_page.h"
@@ -252,6 +253,10 @@ class SourceWalker
             }
             progress_(status_);
         }
+        catch (const ChannelError&)
+        {
+            throw;
+        }
         catch (const std::exception& failure)
         {
             checkOperationCancelled();
@@ -295,6 +300,10 @@ class SourceWalker
                             "Unsupported filename encoding or path");
                     process(path, {}, false);
                 }
+                catch (const ChannelError&)
+                {
+                    throw;
+                }
                 catch (const std::exception& failure)
                 {
                     checkOperationCancelled();
@@ -303,6 +312,10 @@ class SourceWalker
                 iterator.increment(error);
                 require(!error, QString::fromStdString(error.message()));
             }
+        }
+        catch (const ChannelError&)
+        {
+            throw;
         }
         catch (const std::exception& failure)
         {
@@ -335,6 +348,10 @@ class SourceWalker
                              ? sameFileState(rootBefore_, after)
                              : sameSourceDirectoryState(rootBefore_, after)),
                     "Source directory changed during traversal");
+        }
+        catch (const ChannelError&)
+        {
+            throw;
         }
         catch (const std::exception& failure)
         {

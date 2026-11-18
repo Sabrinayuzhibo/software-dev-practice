@@ -146,7 +146,7 @@ export function formatTime(value: string): string {
     return new Date(value).toLocaleString('zh-CN', { hour12: false })
 }
 
-export function TitleBar() {
+export function TitleBar({ remote }: { remote: boolean }) {
     const [maximized, setMaximized] = useState(false)
     useEffect(() => {
         const unsubscribe = window.backup.onWindowMaximizedChange(setMaximized)
@@ -162,7 +162,7 @@ export function TitleBar() {
                 className="titlebar-context"
                 onDoubleClick={() => void window.backup.toggleMaximizeWindow()}
             >
-                本地备份
+                {remote ? '远端备份' : '本地备份'}
             </div>
             <div className="window-controls" role="group" aria-label="窗口控制">
                 <GlassButton

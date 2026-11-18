@@ -1,6 +1,7 @@
 #include "backup/agent/control_service.h"
 #include "backup/agent/operation_dispatch.h"
 #include "backup/agent/realtime.h"
+#include "backup/agent/remote_session.h"
 #include "backup/agent/vault.h"
 #include <QDir>
 // 控制线程拥有配置和调度；单个工作线程执行备份并保存进度、结果。
@@ -28,6 +29,7 @@ namespace
 {
 using namespace backup::core;
 using backup::agent::Channel;
+using backup::agent::ChannelError;
 using backup::agent::State;
 
 bool isVaultCommand(const QString& action)
@@ -166,6 +168,15 @@ class CommandReader final : public QObject
                       const QJsonObject& target)
     {
         Channel channel(target);
+        if (action == "login_remote")
+        {
+            auto result = remoteSessions_.login(channel, target, args);
+            const auto connected = channel.call("health");
+            result.insert("data_root", connected.value("data_root"));
+            result.insert("repository_encryption_id",
+                          connected.value("repository_encryption_id"));
+            return result;
+        }
         channel.authenticate();
         if (isVaultCommand(action))
         {
@@ -229,9 +240,11 @@ class CommandReader final : public QObject
         }
         require(backup::agent::isDataOperation(action) || action == "ping" ||
                     action == "versions" || action == "version_warnings" ||
-                    action == "confirm" || isVaultCommand(action),
+                    action == "confirm" || isVaultCommand(action) ||
+                    action == "login_remote",
                 "Unsupported command");
-        require(!isVaultCommand(action) || args.contains("target_id"),
+        require((!isVaultCommand(action) && action != "login_remote") ||
+                    args.contains("target_id"),
                 "Select a configured repository for password operations");
         QJsonObject task;
         if (action == "backup" ||
@@ -362,6 +375,7 @@ class CommandReader final : public QObject
              stateDirectory, record, recorded, asynchronous]() mutable
             {
                 backup::agent::VaultKeys::Scope keys(keys_);
+                backup::agent::RemoteSessions::Scope sessions(remoteSessions_);
                 QJsonObject result;
                 QString error;
                 QElapsedTimer interval;
@@ -429,6 +443,11 @@ class CommandReader final : public QObject
                                       ? "WAITING"
                                       : "FAILED");
                     record.insert("error", error);
+                    if (const auto* connection =
+                            dynamic_cast<const ChannelError*>(&failure))
+                    {
+                        record.insert("failure_kind", connection->code());
+                    }
                 }
                 record.insert("finished_at", now());
                 QMetaObject::invokeMethod(
@@ -437,7 +456,8 @@ class CommandReader final : public QObject
                      asynchronous, recorded, record]() mutable
                     {
                         worker_->wait();
-                        if ((action == "ping" || isVaultCommand(action)) &&
+                        if ((action == "ping" || isVaultCommand(action) ||
+                             action == "login_remote") &&
                             error.isEmpty() && target.contains("id") &&
                             state_.target(text(target, "id")) == target)
                         {
@@ -479,6 +499,15 @@ class CommandReader final : public QObject
                                     .toString(),
                                 !result.value("unlocked").toBool());
                         }
+                        if (action == "login_remote" && error.isEmpty())
+                        {
+                            realtime_.setAuthenticated(
+                                target, number(result, "expires_in"));
+                        }
+                        if (record.value("failure_kind") == "AUTH_REQUIRED")
+                        {
+                            realtime_.setAuthenticated(target, 0);
+                        }
                         if (action == "backup")
                         {
                             realtime_.completed(record);
@@ -506,6 +535,7 @@ class CommandReader final : public QObject
 
     State state_;
     backup::agent::VaultKeys keys_;
+    backup::agent::RemoteSessions remoteSessions_;
     backup::agent::ControlService control_;
     backup::agent::Realtime realtime_;
     bool busy_ = false;

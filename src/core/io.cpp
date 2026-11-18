@@ -10,8 +10,8 @@
 #include <cmath>
 #include <dirent.h>
 #include <fcntl.h>
-#include <memory>
 #include <limits>
+#include <memory>
 #include <unistd.h>
 
 namespace backup::core
@@ -183,15 +183,14 @@ void writeObject(const QString& path, const QJsonObject& value)
     syncDirectory(QFileInfo(path).absolutePath());
 }
 
-void writeAll(QFile& file, const QByteArray& bytes)
+void writeAll(QIODevice& file, const QByteArray& bytes)
 {
     qint64 offset = 0;
     while (offset < bytes.size())
     {
         const auto written =
             file.write(bytes.constData() + offset, bytes.size() - offset);
-        require(written > 0,
-                "Write failed: " + file.fileName() + ": " + file.errorString());
+        require(written > 0, "Write failed: " + file.errorString());
         offset += written;
     }
 }

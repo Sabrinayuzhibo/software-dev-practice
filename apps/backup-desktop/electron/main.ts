@@ -50,6 +50,34 @@ function registerHandlers(): void {
         }
         return bridge.send('save_target', target)
     })
+    ipcMain.handle(
+        'targets:encryption',
+        (_event, command: unknown, id: unknown, password: unknown) => {
+            const actions = new Map([
+                ['create', 'initialize_encryption'],
+                ['unlock', 'unlock_repository'],
+                ['lock', 'lock_repository'],
+            ])
+            const action =
+                typeof command === 'string' ? actions.get(command) : undefined
+            if (
+                !action ||
+                typeof id !== 'string' ||
+                !id ||
+                id.length > 120 ||
+                (command !== 'lock' &&
+                    (typeof password !== 'string' ||
+                        Buffer.byteLength(password) > 1024))
+            ) {
+                throw new Error('仓库密码设置无效')
+            }
+            const payload =
+                command === 'lock'
+                    ? { target_id: id }
+                    : { target_id: id, password }
+            return bridge.send(action, payload, 20000)
+        },
+    )
     ipcMain.handle('server:ping', async (_event, targetId = 'local') => {
         try {
             const result = await bridge.send<{
@@ -57,6 +85,7 @@ function registerHandlers(): void {
                 data_root: string
                 storage_state: string
                 storage_error?: string
+                repository_locked?: boolean
             }>('ping', { target_id: targetId }, 15000)
             return {
                 connected: true,
@@ -64,6 +93,7 @@ function registerHandlers(): void {
                 error: result.storage_error,
                 server: result.server,
                 dataRoot: result.data_root,
+                locked: result.repository_locked,
             }
         } catch (error) {
             return { connected: false, error: String(error) }

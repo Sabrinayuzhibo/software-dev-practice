@@ -61,7 +61,10 @@ BackupServer::BackupServer(QObject* parent) : QObject(parent)
                                             {"server", "Backup Server"},
                                             {"data_root", repository_.root()},
                                             {"protocol", 1},
-                                            {"archive_format", 1}};
+                                            {"archive_format", 1},
+                                            {"sealed_protocol", 1},
+                                            {"encryption",
+                                             repository_.encryption()}};
                                     }
                                     else if (action == "authenticate")
                                     {
@@ -126,7 +129,7 @@ QJsonObject BackupServer::handleRequest(const QString& action,
                                         bool* uploading, QSet<QString>* reading)
 {
     if (action == "version" || action == "version_warnings" ||
-        action == "entries" || action == "download")
+        action == "entries" || action == "download" || action == "sealed_read")
     {
         const auto id = core::text(args, "version_id");
         if (!reading->contains(id))
@@ -134,6 +137,34 @@ QJsonObject BackupServer::handleRequest(const QString& action,
             repository_.acquireVersion(id);
             reading->insert(id);
         }
+    }
+    if (action == "initialize_encryption")
+    {
+        repository_.initializeEncryption(args);
+        return repository_.encryption();
+    }
+    if (action == "sealed_read")
+    {
+        return repository_.readSealed(args);
+    }
+    if (action == "sealed_begin")
+    {
+        const auto result = repository_.beginSealed(args);
+        *uploading = true;
+        return result;
+    }
+    if (action == "sealed_commit")
+    {
+        core::require(*uploading, "No upload owned by this connection");
+        const auto result = repository_.commitSealed(args);
+        *uploading = false;
+        return result;
+    }
+    if (action == "sealed_chunk")
+    {
+        core::require(*uploading, "No upload owned by this connection");
+        repository_.appendSealed(args);
+        return {};
     }
     if (action == "delete_version")
     {

@@ -755,3 +755,20 @@ Windows 测试使用 Win32 `ShowWindowAsync` 和鼠标事件，经 WSLg 到 Elec
 - 完整回归后补齐控制通道销毁前断开回调、开启任务时合并时间起点，以及通过固定节点描述符监听以拒绝来源父目录软链接替换。重新编译后执行 `meson test -C build backup-realtime realtime-faults --print-errorlogs`：最终二进制 2/2 通过（34.74 秒、9.52 秒）。未将专项补验记为第二次完整回归。
 - 修改文件通过 clang-format 18.1.8、TypeScript/窗口脚本 Prettier、Python Black 和 `git diff --check`。界面只在任务卡新增开关/状态，既有窗口脚本仅补充其隔离 Agent 的清理，没有据此宣称重跑完整历史窗口套件。
 - 日志和已查看截图保存在 `/home/jjj/course/cpp/backup-realtime-20261117-evidence/`，包括 `full-build.log`、`final-focused.log`、`window.log`、`archive-window.log`、`bridge.log` 和 `realtime-850.png`。
+
+## 2026-11-18 仓库与归档加密（FR-15）
+
+参考本地 `ref/8.pdf` 第 5–14 页和《实验指导-加密解密》第 3–10 页。采用 OpenSSL 3 EVP AES-256-GCM、scrypt 和内存密钥，与原备份、还原、压缩、筛选、元数据、归档及实时任务组合。使用说明与格式见[加密备份](encryption.md)。
+
+| 场景 | 实际验证 |
+| --- | --- |
+| 创建并解锁 | 新空仓库启用加密。正确密码可操作，错误密码及锁定读取被拒绝。Server 重启后仍识别策略和仓库 ID，已有明文备份的仓库拒绝原地启用。 |
+| Agent 和 Server 的边界 | 测试代理观察实际协议，确认走密文上传动作，Server 请求和磁盘仓库不含测试密码、文件名及内容标记。Agent 配置不含密码。 |
+| 内容、清单、警告 | 组合 Huffman 和六类规则中的名字排除。跨块清单、空文件、硬链接 inode、软链接文本、权限和纳秒 mtime 核对。翻转内容密文字节后目标文件未发布，翻转清单密文时还原目标目录未创建。 |
+| 便携归档与策略切换 | 停止原服务、移走原仓库后，以归档密码导入另一个使用不同密码和 LZ77 的仓库并还原。错误密码和终帧截断不发布版本。明文目标需明确允许，导入完成后也验证删除版本。 |
+| 实时任务 | 关闭 Agent 并修改源，重启后进入待解锁，等待期间无新增成功版本。重新解锁后补扫并发布。 |
+| 桌面端 | `npm run test:archive --prefix apps/backup-desktop` 真实窗口通过。确认密码不一致、密码错误、锁定/解锁、加密导出和有密码导入均验证。原归档路径及 1120/850 布局回归通过。`npm run test:bridge --prefix apps/backup-desktop` 通过。 |
+
+首次完整回归中 29/30 通过。新增专项在慢速磁盘还原大量空文件时复现连接空闲超时。修复在 Agent 长时间执行本地还原或元数据处理时维持连接，并把归档导入的写入连接延后至整包验证结束。最终代码在主构建目录重编译，`python3 tests/backup_encryption.py build/backup-agent build/backup-server` 和桌面专项均通过。没有将初次回归计为 30/30 通过。
+
+最终代码在独立构建目录以 `meson test -C <验证目录> backup-encryption backup-realtime realtime-faults backup-archive archive-streaming --print-errorlogs` 复验 5/5 通过。加密专项 72.10 秒，原有 1 GiB 归档流式套件 152.18 秒。最终构建无新增编译告警，修改文件通过 clang-format、Prettier、Black 和 `git diff --check`。

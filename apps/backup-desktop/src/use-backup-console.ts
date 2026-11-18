@@ -149,14 +149,18 @@ export function useBackupConsole() {
             setConnection({
                 state: !result.connected
                     ? 'offline'
-                    : result.storageAvailable
-                      ? 'online'
-                      : 'storage-unavailable',
+                    : result.locked
+                      ? 'locked'
+                      : result.storageAvailable
+                        ? 'online'
+                        : 'storage-unavailable',
                 detail: !result.connected
                     ? '服务未连接'
-                    : result.storageAvailable
-                      ? '服务可用'
-                      : '存储不可用',
+                    : result.locked
+                      ? '仓库已锁定，请到备份目标解锁'
+                      : result.storageAvailable
+                        ? '服务可用'
+                        : '存储不可用',
                 root: result.dataRoot || '',
                 error: result.error || '',
             })
@@ -593,6 +597,28 @@ export function useBackupConsole() {
         }
     }
 
+    async function configureEncryption(
+        command: 'create' | 'unlock' | 'lock',
+        id: string,
+        password?: string,
+    ) {
+        setMutating(true)
+        try {
+            await window.backup.configureEncryption(command, id, password)
+            setConfig(await window.backup.getConfig())
+            if (id === targetId) {
+                ++versionRequest.current
+                setVersions([])
+                setVersionTotal(0)
+                setVersionNextOffset(null)
+                setVersionsLoading(false)
+                await refreshConnection()
+            }
+        } finally {
+            setMutating(false)
+        }
+    }
+
     async function saveTarget(event: React.FormEvent) {
         event.preventDefault()
         setMutating(true)
@@ -751,9 +777,9 @@ export function useBackupConsole() {
         )
     }
 
-    async function importArchive() {
+    async function importArchive(password?: string, allowPlain?: boolean) {
         const started = await run(
-            () => window.backup.importArchive(targetId),
+            () => window.backup.importArchive(targetId, password, allowPlain),
             '正在准备导入归档',
             { action: 'import_archive' },
         )
@@ -874,6 +900,7 @@ export function useBackupConsole() {
         setTaskRealtime,
         removeTask,
         saveTarget,
+        configureEncryption,
         showRecord,
         viewVersions,
         removeCandidate,

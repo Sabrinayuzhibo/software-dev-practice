@@ -1,6 +1,7 @@
 #include "backup/agent/control_service.h"
 #include "backup/agent/operation_dispatch.h"
 #include "backup/agent/realtime.h"
+#include "backup/agent/vault.h"
 #include <QDir>
 // 控制线程拥有配置和调度；单个工作线程执行备份并保存进度、结果。
 #include <QCommandLineParser>
@@ -29,6 +30,12 @@ using namespace backup::core;
 using backup::agent::Channel;
 using backup::agent::State;
 
+bool isVaultCommand(const QString& action)
+{
+    return action == "initialize_encryption" || action == "unlock_repository" ||
+           action == "lock_repository";
+}
+
 class CommandReader final : public QObject
 {
   public:
@@ -42,7 +49,17 @@ class CommandReader final : public QObject
                               {{"task_id", id}, {"trigger", "realtime"}});
                     })
     {
-        realtime_.configure(state_.config());
+        const auto config = state_.config();
+        realtime_.configure(config);
+        for (const auto& value : config.value("targets").toArray())
+        {
+            const auto id =
+                value.toObject().value("repository_encryption_id").toString();
+            if (!id.isEmpty())
+            {
+                realtime_.setRepositoryLocked(config, id, true);
+            }
+        }
         // 崩溃后的不确定提交必须先确认原版本，不能直接重新备份。
         for (const auto& name : QDir(state_.directory() + "/operations")
                                     .entryList({"*.json"}, QDir::Files))
@@ -150,6 +167,10 @@ class CommandReader final : public QObject
     {
         Channel channel(target);
         channel.authenticate();
+        if (isVaultCommand(action))
+        {
+            return keys_.configure(action, args, channel);
+        }
         if (action == "ping")
         {
             return channel.call("health");
@@ -208,8 +229,10 @@ class CommandReader final : public QObject
         }
         require(backup::agent::isDataOperation(action) || action == "ping" ||
                     action == "versions" || action == "version_warnings" ||
-                    action == "confirm",
+                    action == "confirm" || isVaultCommand(action),
                 "Unsupported command");
+        require(!isVaultCommand(action) || args.contains("target_id"),
+                "Select a configured repository for password operations");
         QJsonObject task;
         if (action == "backup" ||
             (action == "scan" && args.contains("task_id")))
@@ -338,6 +361,7 @@ class CommandReader final : public QObject
             [this, requestId, action, args, task, target, tasks, targets,
              stateDirectory, record, recorded, asynchronous]() mutable
             {
+                backup::agent::VaultKeys::Scope keys(keys_);
                 QJsonObject result;
                 QString error;
                 QElapsedTimer interval;
@@ -413,15 +437,17 @@ class CommandReader final : public QObject
                      asynchronous, recorded, record]() mutable
                     {
                         worker_->wait();
-                        if (action == "ping" && error.isEmpty() &&
-                            target.contains("id") &&
+                        if ((action == "ping" || isVaultCommand(action)) &&
+                            error.isEmpty() && target.contains("id") &&
                             state_.target(text(target, "id")) == target)
                         {
                             try
                             {
                                 state_.rememberTargetRoot(
                                     text(target, "id"),
-                                    text(result, "data_root"));
+                                    text(result, "data_root"),
+                                    result.value("repository_encryption_id")
+                                        .toString());
                             }
                             catch (const std::exception& failure)
                             {
@@ -445,6 +471,14 @@ class CommandReader final : public QObject
                             }
                         }
                         busy_ = false;
+                        if (isVaultCommand(action) && error.isEmpty())
+                        {
+                            realtime_.setRepositoryLocked(
+                                state_.config(),
+                                result.value("repository_encryption_id")
+                                    .toString(),
+                                !result.value("unlocked").toBool());
+                        }
                         if (action == "backup")
                         {
                             realtime_.completed(record);
@@ -471,6 +505,7 @@ class CommandReader final : public QObject
     }
 
     State state_;
+    backup::agent::VaultKeys keys_;
     backup::agent::ControlService control_;
     backup::agent::Realtime realtime_;
     bool busy_ = false;

@@ -51,6 +51,18 @@ export const stageLabels: Record<string, string> = {
 }
 
 export function archiveError(error: string): string {
+    if (error.includes('Authentication failed')) {
+        return '归档密码错误，或密文已损坏。'
+    }
+    if (error.includes('ENCRYPTED_IMPORT_CONFIRM')) {
+        return '请使用“导入加密归档”并确认允许保存未加密内容，或选择加密仓库。'
+    }
+    if (error.includes('REPOSITORY_LOCKED')) {
+        return '请先到备份目标解锁仓库。'
+    }
+    if (error.includes('Password must contain')) {
+        return '请使用“导入加密归档”输入密码。'
+    }
     if (error.includes('Archive destination already exists')) {
         return '所选归档文件已存在，请更换文件名。'
     }

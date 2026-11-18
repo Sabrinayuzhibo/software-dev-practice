@@ -56,6 +56,7 @@ export function TaskCard({
         PENDING: '等待备份',
         BACKING_UP: '正在备份',
         RETRYING: '等待重试',
+        WAITING_UNLOCK: '等待解锁仓库',
         WAITING_CONFIRMATION: '等待确认提交结果',
     }
     const titleId = `task-${task.id}`

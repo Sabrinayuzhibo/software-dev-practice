@@ -23,6 +23,7 @@ import {
 } from './ui'
 import type { Compression } from './types'
 import type { ConsoleModel } from './use-backup-console'
+import { PasswordDialog } from './password-dialog'
 import { TaskCard } from './task-card'
 import { WarningDetails } from './warning-details'
 import { CreateTaskDialog } from './create-task-dialog'
@@ -31,8 +32,37 @@ import { FileTypeSummary } from './file-type-filter'
 
 export function TargetsView({ model }: { model: ConsoleModel }) {
     const { config, targetDraft, setTargetDraft, mutating, saveTarget } = model
+    const [password, setPassword] = useState<{
+        id: string
+        mode: 'create' | 'unlock'
+    }>()
+    const lock = async (id: string) => {
+        try {
+            await model.configureEncryption('lock', id)
+            model.setMessage('仓库已锁定')
+        } catch (error) {
+            model.setMessage(String(error))
+        }
+    }
     return (
         <section>
+            {password && (
+                <PasswordDialog
+                    key={password.id}
+                    mode={password.mode}
+                    title={
+                        password.mode === 'create' ? '启用仓库加密' : '解锁仓库'
+                    }
+                    onClose={() => setPassword(undefined)}
+                    onSubmit={(value) =>
+                        model.configureEncryption(
+                            password.mode,
+                            password.id,
+                            value,
+                        )
+                    }
+                />
+            )}
             <p className="muted">
                 仓库与源文件位于同一磁盘时，备份无法抵御该磁盘损坏。
             </p>
@@ -49,7 +79,7 @@ export function TargetsView({ model }: { model: ConsoleModel }) {
                     </thead>
                     <tbody>
                         {config.targets.map((item) => (
-                            <tr key={item.id}>
+                            <tr key={item.id} data-target-id={item.id}>
                                 <td>
                                     <Database size={16} /> {item.name}
                                 </td>
@@ -76,6 +106,44 @@ export function TargetsView({ model }: { model: ConsoleModel }) {
                                         <Settings size={16} />
                                         编辑
                                     </GlassButton>
+                                    {item.repository_encryption_id ? (
+                                        <>
+                                            <GlassButton
+                                                className="unlock-repository"
+                                                disabled={model.busy}
+                                                onClick={() =>
+                                                    setPassword({
+                                                        id: item.id,
+                                                        mode: 'unlock',
+                                                    })
+                                                }
+                                            >
+                                                解锁
+                                            </GlassButton>
+                                            <GlassButton
+                                                className="lock-repository"
+                                                disabled={model.busy}
+                                                onClick={() =>
+                                                    void lock(item.id)
+                                                }
+                                            >
+                                                锁定
+                                            </GlassButton>
+                                        </>
+                                    ) : (
+                                        <GlassButton
+                                            className="enable-encryption"
+                                            disabled={model.busy}
+                                            onClick={() =>
+                                                setPassword({
+                                                    id: item.id,
+                                                    mode: 'create',
+                                                })
+                                            }
+                                        >
+                                            启用加密
+                                        </GlassButton>
+                                    )}
                                 </td>
                             </tr>
                         ))}
@@ -185,6 +253,7 @@ export function TargetsView({ model }: { model: ConsoleModel }) {
 }
 
 export function VersionsView({ model }: { model: ConsoleModel }) {
+    const [archivePassword, setArchivePassword] = useState(false)
     const {
         versions,
         versionTotal,
@@ -230,6 +299,23 @@ export function VersionsView({ model }: { model: ConsoleModel }) {
                     <Upload size={16} />
                     导入归档
                 </GlassButton>
+                <GlassButton
+                    className="import-encrypted-archive"
+                    disabled={busy || connection.state !== 'online'}
+                    onClick={() => setArchivePassword(true)}
+                >
+                    导入加密归档
+                </GlassButton>
+                {archivePassword && (
+                    <PasswordDialog
+                        title="导入加密归档"
+                        mode="import"
+                        onClose={() => setArchivePassword(false)}
+                        onSubmit={(password, allowPlain) =>
+                            model.importArchive(password, allowPlain)
+                        }
+                    />
+                )}
                 <GlassButton
                     disabled={
                         busy ||

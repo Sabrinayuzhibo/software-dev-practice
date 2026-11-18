@@ -20,6 +20,12 @@ class Repository
   public:
     void open(const QString& root);
     QString root() const;
+    QJsonObject encryption() const;
+    void initializeEncryption(const QJsonObject& header);
+    QJsonObject beginSealed(const QJsonObject& request);
+    void appendSealed(const QJsonObject& request);
+    QJsonObject commitSealed(const QJsonObject& request);
+    QJsonObject readSealed(const QJsonObject& request) const;
     QString token() const;
     QJsonObject health() const;
     QJsonObject version(const QString& id) const;
@@ -49,6 +55,8 @@ class Repository
     void recordEntry(const QJsonObject& entry);
     QString root_;
     QString token_;
+    QJsonObject encryption_;
+    bool sealedUpload_ = false;
     QString activeId_;
     QString stagingPath_;
     QHash<QString, int> readers_;

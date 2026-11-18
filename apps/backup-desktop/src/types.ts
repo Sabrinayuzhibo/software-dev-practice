@@ -68,6 +68,7 @@ export interface Target {
     repository_path?: string
     data_root?: string
     compression?: Compression
+    repository_encryption_id?: string
 }
 
 export interface RealtimeStatus {
@@ -77,6 +78,7 @@ export interface RealtimeStatus {
         | 'BACKING_UP'
         | 'RETRYING'
         | 'WAITING_CONFIRMATION'
+        | 'WAITING_UNLOCK'
         | 'DEGRADED'
     error: string
     monitor_error: string
@@ -233,10 +235,16 @@ export interface RestorePage {
 
 export interface DesktopApi {
     getConfig(): Promise<Configuration>
+    configureEncryption(
+        command: 'create' | 'unlock' | 'lock',
+        id: string,
+        password?: string,
+    ): Promise<void>
     saveTarget(target: Partial<Target>): Promise<Configuration>
     pingServer(targetId?: string): Promise<{
         connected: boolean
         storageAvailable?: boolean
+        locked?: boolean
         server?: string
         error?: string
         dataRoot?: string
@@ -297,7 +305,11 @@ export interface DesktopApi {
         targetId: string,
         versionId: string,
     ): Promise<{ operation_id: string } | null>
-    importArchive(targetId: string): Promise<{ operation_id: string } | null>
+    importArchive(
+        targetId: string,
+        password?: string,
+        allowPlain?: boolean,
+    ): Promise<{ operation_id: string } | null>
     chooseRestoreDirectory(): Promise<string | null>
     listOperations(
         offset?: number,

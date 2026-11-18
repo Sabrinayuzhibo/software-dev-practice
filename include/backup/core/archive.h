@@ -23,12 +23,12 @@ enum class ArchiveRecord : quint32
 class ArchiveWriter
 {
   public:
-    explicit ArchiveWriter(QFile& output);
+    explicit ArchiveWriter(QIODevice& output);
     void write(ArchiveRecord type, const QByteArray& payload);
     void finish();
 
   private:
-    QFile& output_;
+    QIODevice& output_;
     QCryptographicHash hash_{QCryptographicHash::Sha256};
     qint64 records_ = 0;
     qint64 bytes_ = 0;
@@ -56,5 +56,6 @@ struct ArchiveInfo
 
 // 从当前位置读取完整 BSAR1，拒绝未知格式、越界长度、损坏清单/内容及多余尾字节。
 // 文件内容使用有界缓冲；清单结构校验空间与条目数量相关。失败抛出 Error。
-ArchiveInfo verifyArchive(QFile& input, const ArchiveCallbacks& callbacks = {});
+ArchiveInfo verifyArchive(QIODevice& input,
+                          const ArchiveCallbacks& callbacks = {});
 } // 命名空间 backup::core

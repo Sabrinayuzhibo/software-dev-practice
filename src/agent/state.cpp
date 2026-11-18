@@ -55,7 +55,7 @@ State::State(const QString& directory) : directory_(canonicalPath(directory))
     {
         config_ = readObject(path);
         require((config_.value("format").toInt() >= 1 &&
-                 config_.value("format").toInt() <= 8) &&
+                 config_.value("format").toInt() <= 9) &&
                     config_.value("tasks").isArray() &&
                     config_.value("targets").isArray(),
                 "Invalid Agent configuration; original file preserved");
@@ -69,6 +69,12 @@ State::State(const QString& directory) : directory_(canonicalPath(directory))
                         number(item, "port") > 0 &&
                         number(item, "port") <= 65535,
                     "Invalid saved target");
+            require(
+                !item.contains("repository_encryption_id") ||
+                    (config_.value("format").toInt() >= 9 &&
+                     validId(
+                         item.value("repository_encryption_id").toString())),
+                "Invalid saved repository encryption identity");
             targetIds.insert(id);
             require(compressionAlgorithm(item) == "none" ||
                         config_.value("format").toInt() >= 7,
@@ -126,9 +132,11 @@ State::State(const QString& directory) : directory_(canonicalPath(directory))
         auto record = readObject(directory_ + "/operations/" + name);
         if (record.value("state") == "RUNNING")
         {
-            const bool pendingCommit = record.value("action") == "backup" &&
-                                       (record.value("stage") == "commit" ||
-                                        record.value("stage") == "confirm");
+            const bool pendingCommit =
+                (record.value("action") == "backup" ||
+                 record.value("action") == "import_archive") &&
+                (record.value("stage") == "commit" ||
+                 record.value("stage") == "confirm");
             const bool pendingDeletion =
                 record.value("action") == "delete_version";
             record.insert("state", pendingCommit || pendingDeletion
@@ -172,7 +180,8 @@ QJsonObject State::target(const QString& id) const
     return find(config_.value("targets").toArray(), id);
 }
 
-void State::rememberTargetRoot(const QString& id, const QString& root)
+void State::rememberTargetRoot(const QString& id, const QString& root,
+                               const QString& encryptionId)
 {
     auto targets = config_.value("targets").toArray();
     for (qsizetype index = 0; index < targets.size(); ++index)
@@ -181,9 +190,23 @@ void State::rememberTargetRoot(const QString& id, const QString& root)
         if (item.value("id") == id)
         {
             item.insert("data_root", canonicalPath(root));
+            if (!encryptionId.isEmpty())
+            {
+                require(validId(encryptionId),
+                        "Invalid repository encryption ID");
+                item.insert("repository_encryption_id", encryptionId);
+            }
+            if (item == targets[index].toObject())
+            {
+                return;
+            }
             targets[index] = item;
             auto next = config_;
             next.insert("targets", targets);
+            if (!encryptionId.isEmpty())
+            {
+                next.insert("format", 9);
+            }
             save(next);
             return;
         }
@@ -401,7 +424,7 @@ QJsonObject State::configure(const QString& action, const QJsonObject& args)
             }
         }
         next.insert("tasks", tasks);
-        next.insert("format", 8);
+        next.insert("format", std::max(8, next.value("format").toInt()));
         save(next);
         return next;
     }
@@ -488,6 +511,8 @@ QJsonObject State::configure(const QString& action, const QJsonObject& args)
                                                  previous.value("data_root")))
                 {
                     value.insert("data_root", previous.value("data_root"));
+                    value.insert("repository_encryption_id",
+                                 previous.value("repository_encryption_id"));
                 }
                 targets[index] = value;
                 replaced = true;

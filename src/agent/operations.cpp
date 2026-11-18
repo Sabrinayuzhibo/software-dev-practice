@@ -53,15 +53,19 @@ QJsonObject backup(const QJsonObject& task, const QJsonObject& target,
     auto request = source.json("source");
     const auto compression = compressionAlgorithm(target);
     request.insert("compression", compression);
-    struct stat rootInfo{};
-    require(::stat(QFile::encodeName(source.root()).constData(), &rootInfo) == 0,
+    struct stat rootInfo
+    {
+    };
+    require(::stat(QFile::encodeName(source.root()).constData(), &rootInfo) ==
+                0,
             "Cannot inspect source root metadata");
-    request.insert("root_metadata",
-                   QJsonObject{{"mode", static_cast<qint64>(rootInfo.st_mode & 0777)},
-                               {"uid", QString::number(rootInfo.st_uid)},
-                               {"gid", QString::number(rootInfo.st_gid)},
-                               {"mtime_sec", QString::number(rootInfo.st_mtim.tv_sec)},
-                               {"mtime_nsec", QString::number(rootInfo.st_mtim.tv_nsec)}});
+    request.insert(
+        "root_metadata",
+        QJsonObject{{"mode", static_cast<qint64>(rootInfo.st_mode & 0777)},
+                    {"uid", QString::number(rootInfo.st_uid)},
+                    {"gid", QString::number(rootInfo.st_gid)},
+                    {"mtime_sec", QString::number(rootInfo.st_mtim.tv_sec)},
+                    {"mtime_nsec", QString::number(rootInfo.st_mtim.tv_nsec)}});
     request.insert("operation_id", operationId);
     request.insert("task_id", text(task, "id"));
     if (task.contains("name"))
@@ -97,6 +101,7 @@ QJsonObject backup(const QJsonObject& task, const QJsonObject& target,
                      {{"offset", warningOffset}, {"warnings", items}});
         warningOffset += items.size();
     }
+    channel.prepareCommit();
     progress({{"stage", "commit"},
               {"files", result.value("files")},
               {"bytes", result.value("bytes")}});

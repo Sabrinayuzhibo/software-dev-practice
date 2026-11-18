@@ -34,7 +34,7 @@ void makeDirectory(const QString& path);
 QJsonObject parseObject(const QByteArray& bytes);
 QJsonObject readObject(const QString& path);
 void writeObject(const QString& path, const QJsonObject& value);
-void writeAll(QFile& file, const QByteArray& bytes);
+void writeAll(QIODevice& file, const QByteArray& bytes);
 void syncFile(QFile& file);
 void syncDirectory(const QString& path);
 

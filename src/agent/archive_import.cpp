@@ -7,6 +7,7 @@
 #include "backup/core/detail_page.h"
 #include "backup/core/io.h"
 #include "backup/core/source_scope.h"
+#include "sealed_archive.h"
 
 #include <QJsonArray>
 
@@ -92,11 +93,39 @@ QJsonObject importArchive(const QJsonObject& args, const QJsonObject& target,
     callbacks.warning = [&](const QJsonObject& warning)
     { warnings.append(warning); };
     progress({{"stage", "archive_verify"}});
-    const auto verified = verifyArchive(snapshot, callbacks);
+    const bool encrypted = SealedArchiveInput::detects(snapshot);
+    const auto password = args.value("archive_password").toString();
+    require(encrypted || password.isEmpty(),
+            "Selected archive is not encrypted");
+    const auto access = [&]() -> VaultAccess
+    {
+        if (!encrypted || !password.isEmpty())
+        {
+            return {};
+        }
+        Channel metadata(target);
+        metadata.authenticate();
+        return VaultKeys::access(
+            metadata.health().value("encryption").toObject());
+    }();
+    const auto read = [&]
+    {
+        if (!encrypted)
+        {
+            return verifyArchive(snapshot, callbacks);
+        }
+        SealedArchiveInput input(snapshot, password, access);
+        return verifyArchive(input, callbacks);
+    };
+    const auto verified = read();
     require(snapshot.seek(0), "Cannot rewind verified archive");
     // 从完整验证后的私有快照上传，源文件后续变化不影响此次导入。
     Channel channel(target);
     channel.authenticate();
+    require(!encrypted ||
+                !channel.health().value("encryption").toObject().isEmpty() ||
+                args.value("allow_plain_import") == true,
+            "ENCRYPTED_IMPORT_CONFIRM: importing here stores unencrypted data");
     const auto operationId = text(args, "operation_id");
     beginImport(channel, verified.summary, target, operationId);
     qint64 warningOffset = 0;
@@ -146,9 +175,10 @@ QJsonObject importArchive(const QJsonObject& args, const QJsonObject& target,
         progress(status);
     };
     callbacks.fileEnd = [&] { sink.finishFile(digest); };
-    const auto replayed = verifyArchive(snapshot, callbacks);
+    const auto replayed = read();
     require(replayed.digest == verified.digest,
             "Private archive snapshot changed during import");
+    channel.prepareCommit();
     const auto version = commitImport(channel, target, operationId, progress);
     return {{"archive_path", path},
             {"archive_bytes", QString::number(verified.bytes)},

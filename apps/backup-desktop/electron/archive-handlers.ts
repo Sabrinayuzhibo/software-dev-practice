@@ -36,22 +36,39 @@ export function registerArchiveHandlers(
             })
         },
     )
-    ipcMain.handle('archives:import', async (_event, target: unknown) => {
-        const targetId = identifier(target)
-        const choice = await dialog.showOpenDialog(window(), {
-            title: '选择归档并导入当前备份目标',
-            properties: ['openFile'],
-            filters: [
-                { name: 'Backup System 归档', extensions: ['bsar'] },
-                { name: '所有文件', extensions: ['*'] },
-            ],
-        })
-        if (choice.canceled || choice.filePaths.length !== 1) {
-            return null
-        }
-        return bridge.send('start_import_archive', {
-            target_id: targetId,
-            archive_path: choice.filePaths[0],
-        })
-    })
+    ipcMain.handle(
+        'archives:import',
+        async (
+            _event,
+            target: unknown,
+            password?: unknown,
+            allowPlain?: unknown,
+        ) => {
+            const targetId = identifier(target)
+            if (
+                password !== undefined &&
+                (typeof password !== 'string' ||
+                    Buffer.byteLength(password) > 1024)
+            ) {
+                throw new Error('归档密码无效')
+            }
+            const choice = await dialog.showOpenDialog(window(), {
+                title: '选择归档并导入当前备份目标',
+                properties: ['openFile'],
+                filters: [
+                    { name: 'Backup System 归档', extensions: ['bsar'] },
+                    { name: '所有文件', extensions: ['*'] },
+                ],
+            })
+            if (choice.canceled || choice.filePaths.length !== 1) {
+                return null
+            }
+            return bridge.send('start_import_archive', {
+                target_id: targetId,
+                archive_path: choice.filePaths[0],
+                ...(password ? { archive_password: password } : {}),
+                ...(allowPlain === true ? { allow_plain_import: true } : {}),
+            })
+        },
+    )
 }

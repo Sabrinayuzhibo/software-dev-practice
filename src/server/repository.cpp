@@ -43,6 +43,14 @@ void Repository::open(const QString& root)
                 "Cannot protect local access token");
     }
     token_ = text(readObject(tokenPath), "token");
+    const auto cryptoFile = root_ + "/database/encryption.json";
+    if (QFileInfo::exists(cryptoFile))
+    {
+        encryption_ = readObject(cryptoFile);
+        require(encryption_.value("format") == 1 &&
+                    validId(text(encryption_, "repository_id")),
+                "Invalid repository encryption header");
+    }
     const auto checked = health();
     require(checked.value("storage_state") == "available",
             checked.value("storage_error").toString());
@@ -104,6 +112,16 @@ QJsonObject Repository::version(const QString& id) const
     require(directory.isDir() && !directory.isSymLink(),
             "Version not found or invalid: " + id);
     auto result = readObject(versionPath(id) + "/summary.json");
+    if (result.value("sealed_format") == 1)
+    {
+        require(!encryption_.isEmpty() && result.value("id") == id &&
+                    result.value("repository_id") ==
+                        encryption_.value("repository_id"),
+                "Invalid encrypted version header");
+        return result;
+    }
+    require(encryption_.isEmpty(),
+            "Unencrypted version in encrypted repository");
     require(supportedVersionFormat(result.value("format").toInt()) &&
                 result.value("id") == id,
             "Unsupported or corrupt version");
@@ -164,6 +182,7 @@ QJsonObject Repository::list(const QJsonObject& request) const
         if (request.value("task_id").toString().isEmpty() ||
             value.value("task_id") == request.value("task_id"))
         {
+            value.remove("private_summary");
             versions.append(value);
         }
     }
@@ -236,6 +255,8 @@ QJsonObject Repository::download(const QJsonObject& request) const
 
 QJsonObject Repository::begin(const QJsonObject& request, bool archiveImport)
 {
+    require(encryption_.isEmpty(),
+            "Encrypted repository requires sealed uploads");
     const QString id = text(request, "operation_id");
     const QString finalPath = versionPath(id);
     require(activeId_.isEmpty(), "Repository is busy");
@@ -285,15 +306,15 @@ QJsonObject Repository::begin(const QJsonObject& request, bool archiveImport)
     if (!source.fileTypes().isEmpty())
     {
         summary_.insert("file_types", source.fileTypes());
-        summary_.insert("rules", QJsonObject{{"file_types", source.fileTypes()}});
+        summary_.insert("rules",
+                        QJsonObject{{"file_types", source.fileTypes()}});
     }
     if (source.hasEmptyDirectoryRule())
     {
         summary_.insert("preserve_empty_dirs",
                         source.preservesEmptyDirectories());
         auto rules = summary_.value("rules").toObject();
-        rules.insert("preserve_empty_dirs",
-                     source.preservesEmptyDirectories());
+        rules.insert("preserve_empty_dirs", source.preservesEmptyDirectories());
         summary_.insert("rules", rules);
     }
     if (source.hasFilters())
@@ -377,7 +398,8 @@ void Repository::recordEntry(const QJsonObject& entry)
 
 void Repository::addEntry(const QJsonObject& entry)
 {
-    require(!activeId_.isEmpty() && !content_.isOpen(), "Invalid upload state");
+    require(!sealedUpload_ && !activeId_.isEmpty() && !content_.isOpen(),
+            "Invalid upload state");
     const QString path = text(entry, "path");
     entries_.checkPath(path);
     const QString type = text(entry, "type");
@@ -419,8 +441,7 @@ void Repository::addEntry(const QJsonObject& entry)
         currentEntry_.insert("sha256", text(entry, "sha256"));
     }
     require(source_ && source_->allows(currentEntry_),
-            "Entry is outside the selected sources or custom filters: " +
-                path);
+            "Entry is outside the selected sources or custom filters: " + path);
     if (type != "file")
     {
         recordEntry(currentEntry_);
@@ -444,7 +465,7 @@ void Repository::addEntry(const QJsonObject& entry)
 
 void Repository::append(const QJsonObject& request)
 {
-    require(content_.isOpen(), "No active file");
+    require(!sealedUpload_ && content_.isOpen(), "No active file");
     const QString encoded = text(request, "data");
     require(encoded.size() <= (kChunkBytes * 4 / 3 + 4), "Chunk too large");
     const auto data = QByteArray::fromBase64Encoding(
@@ -469,7 +490,7 @@ void Repository::append(const QJsonObject& request)
 
 void Repository::finishFile(const QString& digest)
 {
-    require(content_.isOpen(), "No active file");
+    require(!sealedUpload_ && content_.isOpen(), "No active file");
     require(receivedBytes_ == number(currentEntry_, "size"),
             "Incomplete content");
     require(QString::fromLatin1(fileHash_.result().toHex()) == digest,
@@ -517,7 +538,8 @@ void Repository::appendWarnings(const QJsonObject& request)
 
 QJsonObject Repository::commit(const QString& id, const QJsonArray& warnings)
 {
-    require(activeId_ == id && !content_.isOpen(), "Incomplete upload");
+    require(!sealedUpload_ && activeId_ == id && !content_.isOpen(),
+            "Incomplete upload");
     if (source_->hasFilters() || (source_->hasEmptyDirectoryRule() &&
                                   !source_->preservesEmptyDirectories()))
     {
@@ -571,6 +593,7 @@ QJsonObject Repository::commit(const QString& id, const QJsonArray& warnings)
 
 void Repository::abort()
 {
+    sealedUpload_ = false;
     content_.close();
     manifest_.close();
     warnings_.close();

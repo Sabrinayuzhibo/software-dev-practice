@@ -243,6 +243,7 @@ struct Realtime::Impl
         std::unique_ptr<Watch> watch;
         bool dirty = true;
         bool running = false;
+        bool locked = false;
         QString waiting;
         QString error;
         QString monitorError;
@@ -279,7 +280,8 @@ Realtime::Realtime(std::function<bool()> busy, Start start)
                      ++it)
                 {
                     const auto& task = it->second;
-                    if (task.dirty && !task.running && task.waiting.isEmpty() &&
+                    if (task.dirty && !task.running && !task.locked &&
+                        task.waiting.isEmpty() &&
                         task.due <= impl_->clock.elapsed() &&
                         (chosen == impl_->tasks.end() ||
                          task.due < chosen->second.due))
@@ -336,6 +338,10 @@ void Realtime::configure(const QJsonObject& config)
             continue;
         }
         task.watch.reset();
+        if (task.config.value("target") != signature.value("target"))
+        {
+            task.locked = false;
+        }
         task.config = signature;
         const auto uncertain = impl_->uncertain.value(id);
         if (!uncertain.isEmpty())
@@ -419,6 +425,8 @@ void Realtime::completed(const QJsonObject& operation)
     }
     auto& task = found->second;
     task.running = false;
+    task.locked =
+        operation.value("error").toString().startsWith("REPOSITORY_LOCKED:");
     task.operation = operation.value("id").toString();
     if (operation.value("state").toString().startsWith("SUCCEEDED"))
     {
@@ -440,6 +448,31 @@ void Realtime::completed(const QJsonObject& operation)
     }
 }
 
+void Realtime::setRepositoryLocked(const QJsonObject& config,
+                                   const QString& repository, bool locked)
+{
+    QSet<QString> targets;
+    for (const auto& value : config.value("targets").toArray())
+    {
+        const auto target = value.toObject();
+        if (target.value("repository_encryption_id") == repository)
+        {
+            targets.insert(text(target, "id"));
+        }
+    }
+    for (auto& [id, task] : impl_->tasks)
+    {
+        if (targets.contains(task.config.value("target_id").toString()) ||
+            (!locked && task.locked))
+        {
+            task.locked = locked;
+            task.failures = 0;
+            task.error.clear();
+            task.due = impl_->clock.elapsed();
+        }
+    }
+}
+
 QJsonObject Realtime::status() const
 {
     QJsonObject result;
@@ -447,6 +480,7 @@ QJsonObject Realtime::status() const
     {
         const auto state = task.running              ? "BACKING_UP"
                            : !task.waiting.isEmpty() ? "WAITING_CONFIRMATION"
+                           : task.locked             ? "WAITING_UNLOCK"
                            : task.failures > 0       ? "RETRYING"
                            : task.dirty              ? "PENDING"
                            : !task.monitorError.isEmpty() ? "DEGRADED"

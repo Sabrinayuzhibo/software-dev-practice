@@ -211,11 +211,16 @@ QJsonObject restoreTree(Channel& channel, const QString& versionId,
                         RestoreJournal& journal, const QString& destination,
                         const Progress& progress)
 {
-    QJsonObject status{{"stage", "restore"}, {"files", 0},
-                       {"directories", 0},   {"bytes", 0},
-                       {"symlinks", 0},      {"hardlinks", 0},
-                       {"fifos", 0},         {"character_devices", 0},
-                       {"block_devices", 0}, {"sockets", 0},
+    QJsonObject status{{"stage", "restore"},
+                       {"files", 0},
+                       {"directories", 0},
+                       {"bytes", 0},
+                       {"symlinks", 0},
+                       {"hardlinks", 0},
+                       {"fifos", 0},
+                       {"character_devices", 0},
+                       {"block_devices", 0},
+                       {"sockets", 0},
                        {"metadata_warning_count", 0},
                        {"warnings", QJsonArray{}},
                        {"destination", destination}};
@@ -225,6 +230,7 @@ QJsonObject restoreTree(Channel& channel, const QString& versionId,
     while (!manifest.atEnd())
     {
         checkOperationCancelled();
+        channel.keepAlive();
         const auto entry = parseObject(manifest.readLine(64 * 1024));
         const QString path = text(entry, "path");
         const auto type = text(entry, "type");
@@ -358,6 +364,9 @@ QJsonObject restore(const QJsonObject& args, const QJsonObject& target,
                      stateDirectory, tasks, targets);
     QTemporaryFile manifest;
     require(manifest.open(), "Cannot create temporary manifest");
+    require(::unlink(QFile::encodeName(manifest.fileName()).constData()) == 0,
+            "Cannot unlink temporary manifest");
+    manifest.setAutoRemove(false);
     progress({{"stage", "verify"}, {"files", 0}, {"bytes", 0}});
     fetchManifest(channel, versionId, summary, manifest);
     RestoreJournal journal(stateDirectory, text(args, "operation_id"));

@@ -16,6 +16,8 @@ class Realtime final : public QObject
     ~Realtime() override;
     void configure(const QJsonObject& config);
     // 执行结果须先持久化；不确定提交会暂停该任务，直到原操作确认完成。
+    void setRepositoryLocked(const QJsonObject& config,
+                             const QString& repository, bool locked);
     void completed(const QJsonObject& operation);
     QJsonObject status() const;
 

@@ -6,32 +6,34 @@ project('BackupSystem', 'cpp',
 qt6 = import('qt6')
 qt_core = dependency('qt6', modules: ['Core'], version: '>=6.4', method: 'pkg-config')
 qt_network = dependency('qt6', modules: ['Network'], method: 'pkg-config')
+crypto = dependency('libcrypto', version: '>=3.0')
 inc = include_directories('include')
 
 protocol = static_library('backup-protocol',
   ['src/protocol/frame.cpp', 'src/core/io.cpp', 'src/core/detail_page.cpp',
    'src/core/manifest.cpp', 'src/core/source_scope.cpp',
-   'src/core/version_verifier.cpp', 'src/core/archive.cpp',
+   'src/core/encryption.cpp', 'src/core/version_verifier.cpp', 'src/core/archive.cpp',
    'src/core/backup_filter.cpp',
    'src/core/compression.cpp', 'src/core/compression_algorithm.cpp',
    'src/core/huffman.cpp', 'src/core/lz77.cpp'],
   include_directories: inc,
-  dependencies: qt_core)
+  dependencies: [qt_core, crypto])
 protocol_dep = declare_dependency(
   link_with: protocol,
   include_directories: inc,
-  dependencies: qt_core)
+  dependencies: [qt_core, crypto])
 
 agent_moc = qt6.compile_moc(
   headers: 'include/backup/agent/agent_client.h',
   include_directories: inc,
   dependencies: [qt_core, qt_network])
 agent_core = static_library('backup-agent-core',
-  ['src/agent/agent_client.cpp', 'src/agent/channel.cpp',
+  ['src/agent/agent_client.cpp', 'src/agent/channel.cpp', 'src/agent/vault.cpp',
+   'src/agent/sealed_upload.cpp', 'src/agent/sealed_download.cpp',
    'src/agent/control_service.cpp', 'src/agent/realtime.cpp',
    'src/agent/state.cpp', 'src/agent/history.cpp', 'src/agent/restore_journal.cpp',
    'src/agent/operations.cpp', 'src/agent/operation_dispatch.cpp',
-   'src/agent/archive_io.cpp', 'src/agent/archive_export.cpp',
+   'src/agent/archive_io.cpp', 'src/agent/sealed_archive.cpp', 'src/agent/archive_export.cpp',
    'src/agent/archive_import.cpp',
    'src/agent/source_tree.cpp', 'src/agent/source_entries.cpp',
    'src/agent/source_sink.cpp', 'src/agent/metadata_restore.cpp',
@@ -50,7 +52,7 @@ server_moc = qt6.compile_moc(
   include_directories: inc,
   dependencies: [qt_core, qt_network])
 server_core = static_library('backup-server-core',
-  ['src/server/backup_server.cpp', 'src/server/repository.cpp',
+  ['src/server/backup_server.cpp', 'src/server/repository.cpp', 'src/server/sealed_repository.cpp',
    'src/server/version_deletion.cpp', server_moc],
   include_directories: inc,
   dependencies: [protocol_dep, qt_network])
@@ -183,4 +185,8 @@ test('backup-realtime', python3,
   timeout: 180)
 test('realtime-faults', python3,
   args: [files('tests/backup_realtime_faults.py')[0], agent.full_path(), server.full_path()],
+  timeout: 180)
+
+test('backup-encryption', python3,
+  args: [files('tests/backup_encryption.py')[0], agent.full_path(), server.full_path()],
   timeout: 180)

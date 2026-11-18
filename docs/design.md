@@ -28,7 +28,8 @@
 | 桌面交互（2026-10-07） | Main 串行发送请求直到收到响应，避免连接检查与数据请求争抢单个 Agent 工作线程；长操作返回执行 ID 后继续轮询。还原目录选择与发起还原分离，确认后才提交；版本按任务筛选。最小化时不暂停 Renderer 定时器，恢复时同步焦点并重绘 |
 | 服务接口 | 保留 `u32be length + JSON` 协议；文件块最多 256 KiB，以 Base64 放入内容消息，每块获得写入确认后再发下一块；清单和版本分页；本机令牌认证 |
 | 未压缩格式 4 / 压缩格式 5，兼容读取 1—4 | `database/access.json` 存本地令牌；`storage/staging/<operation-id>/` 暂存；`storage/versions/<operation-id>/` 保存已提交版本；每版包含 summary.json、entries.jsonl、warnings.jsonl，只有普通文件内容条目生成按编号命名的 .data 文件。摘要保存 warning_count / warnings_sha256，查询仍兼容旧内嵌 warnings；历史版本不改写，两端程序需同时更新 |
-| 独立归档（2026-11-17） | 自有 BSAR1 大端序记录流、完整版本摘要/清单/警告及实际编码内容；最终摘要与逐文件验证后无覆盖导出。导入先验证私有快照，再用 begin_import 上传为新版本，按目标压缩策略编码；原仓库不可用时仍可还原。支持已存类型、元数据和历史 socket，普通备份继续拒绝新 socket。详见[归档实现说明](archive.md)；未交付加密、随机索引和断点续传 |
+| 独立归档（2026-11-17） | 自有 BSAR1 大端序记录流、完整版本摘要/清单/警告及实际编码内容；最终摘要与逐文件验证后无覆盖导出。导入先验证私有快照，再用 begin_import 上传为新版本，按目标压缩策略编码；原仓库不可用时仍可还原。支持已存类型、元数据和历史 socket，普通备份继续拒绝新 socket。详见[归档实现说明](archive.md)；加密外层见下行。随机索引和断点续传仍属目标设计 |
+| 仓库加密（FR-15） | OpenSSL EVP AES-256-GCM、scrypt 封装仓库密钥、内存解锁，Agent 压缩后密封文件和清单区段。Server 仅保存密文。BSAE v1 外层认证 BSAR1 分块记录，独立导入。详情见[当前实现](encryption.md) |
 | 大量警告 | 备份分批上传警告后提交；版本列表省略明细，version_warnings 按需返回，每页最多 100 项、64 KiB 并校验整份 JSONL。Agent 执行记录的重复明细按 SHA-256 共享；版本文件内容仍独立保存 |
 | 扫描 | 文件、目录及跳过条目带类型预览，样本同时受数量和字节上限约束。单项读取失败继续检查其他条目，保存 error_count / complete 和具体路径；扫描不完整时记录 FAILED 并保留预览。备份保持失败即停止的语义 |
 | 提交 | 每个文件验证长度/SHA-256 并 fsync，清单计算整体摘要；摘要与清单写入后同步目录，暂存目录原子改名为版本目录并同步父目录；该改名是唯一可见点；重复 commit 查询同一版本 |
@@ -52,7 +53,7 @@ Server 发布前与 Agent 还原前共用清单校验器，拒绝非目录父路
 
 Agent 对明确的服务拒绝记录 FAILED；传输结果不确定或重启时尚未结束的删除记录为 WAITING。用户从执行记录重新确认后，按原目标、仓库和版本重试；编辑目标配置不会改变重试范围。删除中断后不会自动在启动时继续销毁数据。确认弹窗为普通面板，操作按钮保留液态玻璃，默认键盘焦点在“取消”。
 
-当前尚未采用下文的 SQLite、跨版本对象去重、二进制 DATA 帧、远端 TLS 或加密。源文件可读性/类型、读取前后 stat 信息和目录变化会检查，但不提供文件系统原子快照。新程序读取格式 1—5；未来对象仓库迁移仍需单独设计，不能将现有格式直接当作该设计的数据。
+当前尚未采用下文的 SQLite、跨版本对象去重、二进制 DATA 帧、远端 TLS。源文件可读性/类型、读取前后 stat 信息和目录变化会检查，但不提供文件系统原子快照。新程序读取格式 1—5；未来对象仓库迁移仍需单独设计，不能将现有格式直接当作该设计的数据。
 
 基础代码分工：`src/core/io.cpp` 提供受检 I/O，`manifest.cpp` 校验清单，`source_scope.cpp` 定义保存的选择范围；`src/agent/source_selection.cpp` 校验及规范化用户选择，`state.cpp` 管配置和记录；`channel.cpp` 管工作线程的有界 RPC；`source_tree.cpp` 统一扫描与上传遍历，`operations.cpp` 编排扫描/备份，`restore.cpp` 校验并还原；`src/server/repository.cpp` 管暂存和版本；Main/Preload 只开放固定入口。C++ 的 `.clang-format` 与项目 skill 约束新代码。
 
@@ -291,7 +292,7 @@ P2 保存 rwx、mtime 秒/纳秒、UID/GID；不承诺 ACL、xattr、atime、cti
 
 ### 6.1 密钥与编码
 
-压缩按 2026-10-25 用户提供的课件改为自行实现 Huffman 与 LZ77，不再采用原定 zstd。当前目标策略、分块编码格式和校验流程见[压缩实现说明](compression.md)。以下加密与对象管线仍为后续设计：加密使用 libsodium Argon2id 和 secretstream_xchacha20poly1305。仓库创建生成 16 字节 salt 与 32 字节根密钥，Argon2id（ops=3、mem=64 MiB）从密码派生封装密钥，XChaCha20-Poly1305 封装根密钥并绑定 repo_id/格式。公开保存盐、成本、随机 nonce 与密文；按独立上下文派生 K_id/K_object/K_manifest。重启只保留封装材料，用户密码验证后恢复内存密钥。丢失密码不能找回；首版不提供改密码/原地转密文。
+压缩按 2026-10-25 用户提供的课件改为自行实现 Huffman 与 LZ77，不再采用原定 zstd。当前目标策略、分块编码格式和校验流程见[压缩实现说明](compression.md)。当前交付采用[OpenSSL AES-GCM 与 scrypt](encryption.md)。以下 libsodium 和对象索引部分为原目标设计：加密使用 libsodium Argon2id 和 secretstream_xchacha20poly1305。仓库创建生成 16 字节 salt 与 32 字节根密钥，Argon2id（ops=3、mem=64 MiB）从密码派生封装密钥，XChaCha20-Poly1305 封装根密钥并绑定 repo_id/格式。公开保存盐、成本、随机 nonce 与密文；按独立上下文派生 K_id/K_object/K_manifest。重启只保留封装材料，用户密码验证后恢复内存密钥。丢失密码不能找回；首版不提供改密码/原地转密文。
 
 原文流式 SHA-256 → 可选 Huffman/LZ77 → 可选 secretstream → Storage。新对象有随机 stream header；最多 1 MiB 编码块各有认证标签，末块 FINAL；解码校验序号、关联数据、FINAL 和原文摘要。不由文件哈希固定 nonce；相同内容复用已有对象，不重用 nonce 加密其他字节。
 
@@ -301,7 +302,7 @@ P2 保存 rwx、mtime 秒/纳秒、UID/GID；不承诺 ACL、xattr、atime、cti
 
 ### 6.2 单文件归档
 
-当前实现是[归档说明](archive.md)中的未加密 BSAR1 顺序记录流，已交付 FR-13。以下包含认证加密、KDF 和随机访问索引的内容仍为后续目标设计，不能作为当前能力说明。
+当前实现兼容 BSAR1，并以 BSAE v1 封装加密归档。实际格式见[归档说明](archive.md)及[加密说明](encryption.md)。以下随机访问索引及版式为原目标设计。
 
 项目自有 BSAR1 对已提交完整版本导出全部所需内容，不依赖原仓库：
 

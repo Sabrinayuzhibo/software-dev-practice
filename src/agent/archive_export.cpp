@@ -5,6 +5,7 @@
 #include "backup/core/detail_page.h"
 #include "backup/core/io.h"
 #include "backup/core/source_scope.h"
+#include "sealed_archive.h"
 
 #include <QFileInfo>
 #include <QJsonArray>
@@ -193,13 +194,30 @@ QJsonObject exportArchive(const QJsonObject& args, const QJsonObject& target,
     QTemporaryFile temporary("/proc/self/fd/" + QString::number(parent.get()) +
                              "/.backup-archive-XXXXXX");
     require(temporary.open(), "Cannot create temporary archive");
-    ArchiveWriter writer(temporary);
+    std::unique_ptr<SealedArchiveOutput> encrypted;
+    auto access =
+        VaultKeys::access(channel.health().value("encryption").toObject());
+    if (args.contains("archive_password"))
+    {
+        access = newVault(text(args, "archive_password"));
+    }
+    if (!access.header.isEmpty())
+    {
+        encrypted = std::make_unique<SealedArchiveOutput>(temporary, access);
+    }
+    QIODevice& output =
+        encrypted ? static_cast<QIODevice&>(*encrypted) : temporary;
+    ArchiveWriter writer(output);
     writer.write(ArchiveRecord::Summary,
                  QJsonDocument(summary).toJson(QJsonDocument::Compact));
     exportWarnings(channel, id, writer);
     QJsonObject status{{"stage", "archive_export"}, {"files", 0}, {"bytes", 0}};
     exportEntries(channel, id, summary, writer, status, progress);
     writer.finish();
+    if (encrypted)
+    {
+        encrypted->finish();
+    }
     require(temporary.flush() && temporary.seek(0),
             "Cannot verify exported archive");
     QJsonArray warnings;
@@ -208,7 +226,16 @@ QJsonObject exportArchive(const QJsonObject& args, const QJsonObject& target,
     callbacks.warning = [&](const QJsonObject& warning)
     { warnings.append(warning); };
     progress({{"stage", "archive_verify"}});
-    const auto info = verifyArchive(temporary, callbacks);
+    std::unique_ptr<SealedArchiveInput> verified;
+    if (encrypted)
+    {
+        verified =
+            std::make_unique<SealedArchiveInput>(temporary, QString(), access);
+    }
+    QIODevice& input =
+        verified ? static_cast<QIODevice&>(*verified) : temporary;
+    verifyArchive(input, callbacks);
+    const auto archiveBytes = temporary.size();
     syncFile(temporary);
     checkOperationCancelled();
     const auto pinned =
@@ -219,7 +246,7 @@ QJsonObject exportArchive(const QJsonObject& args, const QJsonObject& target,
     require(temporary.remove() && ::fsync(parent.get()) == 0,
             "Cannot persist exported archive: " + destination);
     return {{"archive_path", destination},
-            {"archive_bytes", QString::number(info.bytes)},
+            {"archive_bytes", QString::number(archiveBytes)},
             {"files", number(summary, "files")},
             {"bytes", number(summary, "bytes")},
             {"warnings", warnings},

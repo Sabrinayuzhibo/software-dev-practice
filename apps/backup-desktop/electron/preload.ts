@@ -2,6 +2,8 @@ import { contextBridge, ipcRenderer } from 'electron'
 
 contextBridge.exposeInMainWorld('backup', {
     getConfig: () => ipcRenderer.invoke('config:get'),
+    configureEncryption: (command: string, id: string, password?: string) =>
+        ipcRenderer.invoke('targets:encryption', command, id, password),
     saveTarget: (target: unknown) => ipcRenderer.invoke('targets:save', target),
     pingServer: (targetId = 'local') =>
         ipcRenderer.invoke('server:ping', targetId),
@@ -89,8 +91,11 @@ contextBridge.exposeInMainWorld('backup', {
         ipcRenderer.invoke('operations:warnings', id, offset),
     exportArchive: (targetId: string, versionId: string) =>
         ipcRenderer.invoke('archives:export', targetId, versionId),
-    importArchive: (targetId: string) =>
-        ipcRenderer.invoke('archives:import', targetId),
+    importArchive: (
+        targetId: string,
+        password?: string,
+        allowPlain?: boolean,
+    ) => ipcRenderer.invoke('archives:import', targetId, password, allowPlain),
     getRestoreEntries: (id: string, offset = 0) =>
         ipcRenderer.invoke('operations:restore-entries', id, offset),
     confirmOperation: (id: string, targetId: string) =>

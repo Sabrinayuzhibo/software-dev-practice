@@ -397,6 +397,106 @@ try {
                 item.archive_path === archive,
         ),
     )
+    // 独立的新仓库覆盖真实密码控件、锁定和加密归档操作。
+    const encrypted = await server('encrypted-repository')
+    await page.evaluate(
+        `window.backup.saveTarget({id:'encrypted',name:'加密验收仓库',host:'127.0.0.1',port:${encrypted.port}})`,
+    )
+    await page.call('Page.reload')
+    await requireGlass(page, until)
+    await page.evaluate(`(() => {
+        const select = document.querySelector('.target-selector select');
+        select.value = 'encrypted';
+        select.dispatchEvent(new Event('change', { bubbles: true }));
+    })()`)
+    await click('[data-tab="targets"]')
+    const row = 'tr[data-target-id="encrypted"]'
+    const typePassword = async (index, value) => {
+        await page.evaluate(`(() => {
+            const input = document.querySelectorAll('dialog[open] input[type="password"]')[${index}];
+            input.focus();
+            input.select();
+        })()`)
+        await page.call('Input.insertText', { text: value })
+    }
+    const testPassword = 'fixture-password-非生产!'
+    await click(row + ' .enable-encryption')
+    await typePassword(0, testPassword)
+    await typePassword(1, 'wrong confirmation')
+    await click('dialog[open] button[type="submit"]')
+    await until(
+        () =>
+            page.evaluate(
+                "document.querySelector('dialog[open] [role=alert]')?.textContent.includes('不一致')",
+            ),
+        'password confirmation',
+    )
+    await typePassword(1, testPassword)
+    await click('dialog[open] button[type="submit"]')
+    await until(
+        () => page.evaluate("!document.querySelector('dialog[open]')"),
+        'encryption enabled',
+    )
+    await click(row + ' .lock-repository')
+    await until(
+        () =>
+            page.evaluate(
+                "document.querySelector('.status-dot')?.classList.contains('locked')",
+            ),
+        'locked status',
+    )
+    await click(row + ' .unlock-repository')
+    await typePassword(0, 'wrong')
+    await click('dialog[open] button[type="submit"]')
+    await until(
+        () =>
+            page.evaluate(
+                "document.querySelector('dialog[open] [role=alert]')?.textContent.includes('密码错误')",
+            ),
+        'wrong password rejected',
+    )
+    await typePassword(0, testPassword)
+    await click('dialog[open] button[type="submit"]')
+    await until(
+        () =>
+            page.evaluate(
+                "!document.querySelector('dialog[open]') && document.querySelector('.status-dot')?.classList.contains('online')",
+            ),
+        'correct password unlocks',
+    )
+    await click('[data-tab="versions"]')
+    await main.evaluate(
+        `testElectron.dialog.showOpenDialog = async () => ({canceled:false,filePaths:[${JSON.stringify(archive)}]})`,
+    )
+    await click('.import-archive')
+    await finished('导入归档')
+    const sealedArchive = join(temporary, 'encrypted.bsar')
+    await main.evaluate(
+        `testElectron.dialog.showSaveDialog = async () => ({canceled:false,filePath:${JSON.stringify(sealedArchive)}})`,
+    )
+    await click('.export-archive')
+    await finished('导出归档')
+    assert.equal(
+        (await readFile(sealedArchive)).subarray(0, 4).toString(),
+        'BSAE',
+    )
+    await main.evaluate(
+        `testElectron.dialog.showOpenDialog = async () => ({canceled:false,filePaths:[${JSON.stringify(sealedArchive)}]})`,
+    )
+    await click('.import-encrypted-archive')
+    await typePassword(0, testPassword)
+    await click('dialog[open] button[type="submit"]')
+    await finished('导入归档')
+    await until(
+        () =>
+            page.evaluate(
+                "document.querySelectorAll('.versions-table tbody tr').length === 2",
+            ),
+        'encrypted archive imported in GUI',
+    )
+    console.log(
+        'PASS: real password dialog, mismatch and wrong password, lock/unlock, encrypted export and import',
+    )
     await main.evaluate('testWindow.close()')
     main.close()
     page.close()

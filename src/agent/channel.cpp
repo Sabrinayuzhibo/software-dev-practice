@@ -1,8 +1,11 @@
 #include "backup/agent/channel.h"
+#include "backup/core/detail_page.h"
 #include "backup/core/io.h"
+#include "sealed_session.h"
 
 #include <QElapsedTimer>
 #include <QFileInfo>
+#include <QJsonDocument>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -25,13 +28,21 @@ Channel::Channel(const QJsonObject& target)
     const bool connected = socket_.waitForConnected(kTimeoutMs);
     require(connected,
             "Cannot connect to local Server: " + socket_.errorString());
-    health_ = call("ping");
+    health_ = rawCall("ping");
+    const auto expectedVault =
+        target.value("repository_encryption_id").toString();
+    require(expectedVault.isEmpty() ||
+                health_.value("encryption").toObject().value("repository_id") ==
+                    expectedVault,
+            "Repository encryption identity changed");
     const auto expectedRoot = target.value("repository_path").toString();
     require(expectedRoot.isEmpty() ||
                 canonicalPath(expectedRoot) ==
                     canonicalPath(text(health_, "data_root")),
             "Repository path does not match the connected Server");
 }
+
+Channel::~Channel() = default;
 
 QJsonObject Channel::health() const
 {
@@ -51,7 +62,7 @@ void Channel::authenticate()
     call("authenticate", {{"token", text(readObject(path), "token")}});
 }
 
-QJsonObject Channel::call(const QString& action, const QJsonObject& payload)
+QJsonObject Channel::rawCall(const QString& action, const QJsonObject& payload)
 {
     const QString id = newId();
     const auto frame = protocol::encode({action, id, payload});
@@ -90,8 +101,104 @@ QJsonObject Channel::call(const QString& action, const QJsonObject& payload)
         }
         require(message.type == (action == "ping" ? "pong" : "result"),
                 "Invalid response type");
+        lastResponse_.start();
         return message.payload;
     }
     throw Error("Server response timed out");
 }
-} // namespace backup::agent
+void Channel::keepAlive()
+{
+    // 空文件、目录和链接可以在 Agent 内处理很久，同时须保留 Server 读取保护。
+    constexpr auto kKeepAliveMs = 5000;
+    if (!health_.value("encryption").toObject().isEmpty() &&
+        lastResponse_.hasExpired(kKeepAliveMs))
+    {
+        rawCall("ping");
+    }
+}
+
+void Channel::prepareCommit()
+{
+    if (upload_)
+    {
+        upload_->prepareCommit();
+    }
+}
+
+QJsonObject Channel::call(const QString& action, const QJsonObject& payload)
+{
+    const auto header = health_.value("encryption").toObject();
+    if (header.isEmpty() || action == "authenticate")
+    {
+        return rawCall(action, payload);
+    }
+    const auto access = VaultKeys::access(header);
+    if (action == "health")
+    {
+        auto result = rawCall(action, payload);
+        result.insert("repository_encryption_id",
+                      header.value("repository_id"));
+        result.insert("repository_locked", !access.key);
+        return result;
+    }
+    if (action == "begin" || action == "begin_import")
+    {
+        upload_ = std::make_unique<SealedUpload>(*this, access, payload);
+        return upload_->receipt();
+    }
+    keepAlive();
+    if (upload_)
+    {
+        return upload_->dispatch(action, payload);
+    }
+    if (!access.key)
+    {
+        throw RepositoryLocked();
+    }
+    if (action == "versions")
+    {
+        auto result = rawCall(action, payload);
+        QJsonArray versions;
+        const auto offset =
+            payload.contains("offset") ? number(payload, "offset") : 0;
+        qint64 bytes = 0;
+        for (const auto& value : result.value("versions").toArray())
+        {
+            const auto summary =
+                call("version", {{"version_id", value.toObject().value("id")}});
+            bytes +=
+                QJsonDocument(summary).toJson(QJsonDocument::Compact).size();
+            if (!versions.isEmpty() && bytes > kDetailPageBytes)
+            {
+                result.insert("next_offset", offset + versions.size());
+                break;
+            }
+            versions.append(summary);
+        }
+        result.insert("versions", versions);
+        return result;
+    }
+    if (action == "delete_version")
+    {
+        auto result = rawCall(action, payload);
+        result.insert("version", SealedDownload::privateSummary(
+                                     access, result.value("version").toObject())
+                                     .value("summary"));
+        return result;
+    }
+    if (action == "version" || action == "entries" || action == "download" ||
+        action == "version_warnings")
+    {
+        const auto id = text(payload, "version_id");
+        if (!download_ || version_ != id)
+        {
+            const auto version = rawCall("version", {{"version_id", id}});
+            download_ =
+                std::make_unique<SealedDownload>(*this, access, version);
+            version_ = id;
+        }
+        return download_->dispatch(action, payload);
+    }
+    throw Error("Unsupported encrypted repository request");
+}
+} // 命名空间 backup::agent

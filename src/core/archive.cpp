@@ -52,11 +52,10 @@ void checkLength(ArchiveRecord type, quint64 length)
     }
 }
 
-QByteArray readExact(QFile& input, qint64 count)
+QByteArray readExact(QIODevice& input, qint64 count)
 {
     const auto bytes = input.read(count);
-    require(input.error() == QFileDevice::NoError && bytes.size() == count,
-            "Truncated or unreadable archive");
+    require(bytes.size() == count, "Truncated or unreadable archive");
     return bytes;
 }
 
@@ -141,7 +140,7 @@ class FileVerifier
 class ArchiveParser
 {
   public:
-    ArchiveParser(QFile& input, const ArchiveCallbacks& callbacks)
+    ArchiveParser(QIODevice& input, const ArchiveCallbacks& callbacks)
         : input_(input), callbacks_(callbacks)
     {
     }
@@ -277,9 +276,8 @@ class ArchiveParser
                         static_cast<quint64>(bytes_) &&
                     trailer.sliced(16) == digest,
                 "Archive trailer checksum or counters mismatch");
-        require(input_.read(1).isEmpty() &&
-                    input_.error() == QFileDevice::NoError,
-                "Trailing archive bytes");
+        char tail;
+        require(input_.read(&tail, 1) == 0, "Trailing archive bytes");
         verifier_->finish();
         require(warnings_ == (summary_.contains("warning_count")
                                   ? number(summary_, "warning_count")
@@ -292,7 +290,7 @@ class ArchiveParser
         return {summary_, digest, records_,
                 bytes_ + kRecordHeaderBytes + kTrailerBytes};
     }
-    QFile& input_;
+    QIODevice& input_;
     const ArchiveCallbacks& callbacks_;
     QJsonObject summary_;
     std::unique_ptr<VersionVerifier> verifier_;
@@ -306,7 +304,7 @@ class ArchiveParser
 };
 } // 匿名命名空间
 
-ArchiveWriter::ArchiveWriter(QFile& output) : output_(output)
+ArchiveWriter::ArchiveWriter(QIODevice& output) : output_(output)
 {
     require(output_.pos() == 0 && output_.size() == 0,
             "Archive output must be empty");
@@ -348,7 +346,7 @@ void ArchiveWriter::finish()
     finished_ = true;
 }
 
-ArchiveInfo verifyArchive(QFile& input, const ArchiveCallbacks& callbacks)
+ArchiveInfo verifyArchive(QIODevice& input, const ArchiveCallbacks& callbacks)
 {
     ArchiveParser parser(input, callbacks);
     return parser.run();
